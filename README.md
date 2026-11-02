@@ -101,7 +101,8 @@ You only need to do steps 1–2 once.
 2. **Get the code** and install its parts:
 
    ```bash
-   cd ~/Documentos/dev/echo-data-viewer      # or wherever you put the project
+   git clone https://github.com/matheusinfo/echo-penguin-manager.git
+   cd echo-penguin-manager
    npm install
    ```
 

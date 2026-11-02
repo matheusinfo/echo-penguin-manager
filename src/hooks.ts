@@ -177,16 +177,17 @@ export function useStored<T>(name: string, initial: T) {
   const [value, setValue] = useState<T>(initial);
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    echo.store.get<T>(name, initial).then((v) => {
-      setValue(v ?? initial);
-      setReady(true);
-    });
+    // A failed read must never leave a page waiting: fall back to the initial value.
+    echo.store.get<T>(name, initial)
+      .then((v) => setValue(v ?? initial))
+      .catch(() => setValue(initial))
+      .finally(() => setReady(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name]);
   const update = useCallback((v: T | ((prev: T) => T)) => {
     setValue((prev) => {
       const next = typeof v === 'function' ? (v as (p: T) => T)(prev) : v;
-      echo.store.set(name, next);
+      echo.store.set(name, next).catch(() => { /* keep the value for this session */ });
       return next;
     });
   }, [name]);

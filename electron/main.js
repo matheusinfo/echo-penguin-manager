@@ -23,9 +23,10 @@ const DEFAULT_CONFIG = {
 // when no keyring is available.
 
 const configFile = () => path.join(app.getPath('userData'), 'config.json');
-const STORE_NAME = /^[a-z0-9_-]{1,64}$/i;
+// Letters, digits, '_', '-', '.' (e.g. "system.tab"); never a path: no '/', no '..', no leading dot.
+const STORE_NAME = /^[a-z0-9][a-z0-9_.-]{0,63}$/i;
 const dataFile = (name) => {
-  if (typeof name !== 'string' || !STORE_NAME.test(name)) throw new Error('nome inválido');
+  if (typeof name !== 'string' || !STORE_NAME.test(name) || name.includes('..') || name.toLowerCase() === 'config') throw new Error('nome inválido');
   return path.join(app.getPath('userData'), `${name}.json`);
 };
 
