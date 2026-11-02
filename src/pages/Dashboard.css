@@ -1,0 +1,70 @@
+/* Dashboard ("Visão geral") page-specific styles. */
+
+.dash-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--panel);
+  position: relative;
+  overflow: hidden;
+}
+.dash-banner::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+}
+.dash-banner.tone-ok { background: linear-gradient(90deg, rgba(62, 207, 142, .10), var(--panel) 45%); border-color: rgba(62, 207, 142, .28); }
+.dash-banner.tone-ok::before { background: var(--ok); }
+.dash-banner.tone-warn { background: linear-gradient(90deg, rgba(245, 176, 65, .12), var(--panel) 45%); border-color: rgba(245, 176, 65, .32); }
+.dash-banner.tone-warn::before { background: var(--warn); }
+.dash-banner.tone-bad { background: linear-gradient(90deg, rgba(239, 90, 90, .14), var(--panel) 45%); border-color: rgba(239, 90, 90, .38); }
+.dash-banner.tone-bad::before { background: var(--bad); }
+.dash-banner.tone-muted::before { background: var(--muted); }
+
+.dash-banner-icon {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--panel-2);
+}
+.dash-banner.tone-ok .dash-banner-icon { color: var(--ok); background: rgba(62, 207, 142, .14); }
+.dash-banner.tone-warn .dash-banner-icon { color: var(--warn); background: rgba(245, 176, 65, .14); }
+.dash-banner.tone-bad .dash-banner-icon { color: var(--bad); background: rgba(239, 90, 90, .16); }
+
+.dash-banner-title { font-size: 18px; font-weight: 650; display: flex; align-items: center; gap: 10px; }
+.dash-banner-sub { color: var(--text-2); font-size: 13px; margin-top: 2px; }
+.dash-reasons { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.dash-reasons li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.dash-banner-meta { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 12px; color: var(--muted); text-align: right; }
+.dash-banner-meta strong { color: var(--text-2); font-weight: 600; }
+
+.dash-tile { padding: 14px; display: flex; flex-direction: column; gap: 10px; min-height: 118px; }
+.dash-tile .spark { margin-top: auto; }
+.dash-tile-foot { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: -4px; }
+.dash-help { cursor: help; color: var(--muted); display: inline-flex; }
+
+.dash-list { display: flex; flex-direction: column; }
+.dash-list-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px dashed rgba(42, 48, 64, .7); min-width: 0; }
+.dash-list-row:last-child { border-bottom: 0; }
+.dash-list-row.clickable { cursor: pointer; border-radius: 4px; }
+.dash-list-row.clickable:hover { background: rgba(255, 255, 255, .03); }
+
+.dash-meters { display: flex; flex-direction: column; gap: 14px; }
+
+.dash-alarm-time { font-size: 34px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: .02em; line-height: 1.1; }
+.dash-alarm-time.off { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 2px; }
+
+.dash-log { max-height: 200px; }
+.dash-counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+
+@media (max-width: 1100px) {
+  .dash-banner { flex-wrap: wrap; }
+  .dash-banner-meta { align-items: flex-start; text-align: left; }
+}

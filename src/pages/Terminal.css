@@ -1,0 +1,74 @@
+/* Terminal SSH page. Everything is prefixed with .tp- to stay out of other pages' way. */
+
+/* The page fills the viewport height; the terminal takes whatever is left. */
+.tp-root { height: 100vh; min-height: 420px; }
+.tp-root > .page { height: 100%; display: flex; flex-direction: column; max-width: none; padding-bottom: 16px; }
+.tp-root > .page > .page-head { margin-bottom: 10px; flex: none; }
+.tp-root > .page > .page-body { flex: 1; min-height: 0; gap: 12px; }
+.tp-root .tabs { flex: none; }
+.tp-mode { flex: 1; min-height: 0; gap: 12px; }
+
+/* ---- terminal column ---- */
+.tp-term-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tp-tabbar { display: flex; align-items: flex-end; gap: 2px; min-height: 34px; overflow-x: auto; overflow-y: hidden; flex: none; scrollbar-width: thin; }
+.tp-tab { display: flex; align-items: center; gap: 7px; padding: 6px 6px 6px 11px; max-width: 220px; border: 1px solid var(--border); border-bottom: 0; border-radius: var(--radius-s) var(--radius-s) 0 0; background: var(--bg-2); color: var(--text-2); cursor: pointer; font-size: 12.5px; user-select: none; flex: none; }
+.tp-tab:hover { color: var(--text); background: var(--panel); }
+.tp-tab.active { background: #0b0d11; color: var(--text); box-shadow: inset 0 2px 0 var(--accent); }
+.tp-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-tab-rename { width: 120px; background: var(--bg); border: 1px solid var(--accent); color: var(--text); border-radius: 4px; padding: 1px 5px; font: inherit; outline: none; }
+.tp-tab-close { display: grid; place-items: center; width: 18px; height: 18px; border: 0; border-radius: 4px; background: none; color: var(--muted); cursor: pointer; padding: 0; }
+.tp-tab-close:hover { background: var(--panel-2); color: var(--bad); }
+.tp-tab-add { display: grid; place-items: center; width: 28px; height: 28px; margin-left: 2px; margin-bottom: 2px; border: 1px dashed var(--border); border-radius: var(--radius-s); background: none; color: var(--text-2); cursor: pointer; flex: none; }
+.tp-tab-add:hover { color: var(--text); border-color: var(--accent); }
+.tp-term-tools { gap: 2px; padding-bottom: 3px; flex: none; }
+
+.term-host.tp-host { flex: 1; height: auto; min-height: 200px; position: relative; border-top-left-radius: 0; overflow: hidden; }
+.tp-session { position: absolute; inset: 6px; }
+.tp-xterm { width: 100%; height: 100%; }
+.tp-xterm .xterm { height: 100%; }
+.tp-xterm .xterm-viewport { background-color: #0b0d11 !important; }
+
+.tp-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+.tp-closed-bar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 7px 8px 7px 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); font-size: 12.5px; z-index: 5; white-space: nowrap; }
+
+/* ---- snippets panel ---- */
+.tp-snippets { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.tp-snippets-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.tp-snippets-filter { padding: 8px; border-bottom: 1px solid var(--border); }
+.tp-snippets-filter .search { width: 100%; }
+.tp-snippets-list { flex: 1; min-height: 0; overflow: auto; padding: 4px; }
+.tp-snippets-foot { padding: 8px 12px; border-top: 1px solid var(--border); }
+.tp-snippet { display: flex; align-items: center; border-radius: var(--radius-s); }
+.tp-snippet:hover { background: var(--panel-2); }
+.tp-snippet-main { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 1px; padding: 6px 8px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tp-snippet-main:disabled { cursor: default; }
+.tp-snippet-name { display: flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 500; min-width: 0; }
+.tp-snippet-cmd { font-size: 11.5px; color: var(--muted); }
+.tp-danger-icon { color: var(--warn); flex: none; }
+.tp-snippet-actions { display: none; flex: none; gap: 0; padding-right: 2px; }
+.tp-snippet:hover .tp-snippet-actions, .tp-snippet:focus-within .tp-snippet-actions { display: flex; }
+.tp-snippet-actions .btn-s { padding: 4px 5px; }
+
+/* ---- one-shot runner ---- */
+.tp-mode-exec { overflow: hidden; }
+.tp-exec { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.tp-exec-main { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 2px; }
+.tp-exec-input { width: 100%; min-height: 80px; }
+.tp-timeout { width: 72px; padding: 4px 8px; }
+.tp-warn { color: var(--warn); background: rgba(245, 176, 65, .08); border: 1px solid rgba(245, 176, 65, .25); border-radius: var(--radius-s); padding: 6px 10px; }
+.tp-stderr-label { color: #ff8a8a; font-weight: 600; }
+.pre.tp-stderr { color: #ffb3b3; border-color: rgba(239, 90, 90, .3); }
+
+.tp-history { width: 340px; flex: none; min-height: 0; }
+.tp-history > div:last-child { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tp-history-filter { padding: 8px; border-bottom: 1px solid var(--border); }
+.tp-history-filter .search { width: 100%; }
+.tp-history-list { flex: 1; min-height: 0; overflow: auto; padding: 4px; }
+.tp-history-item { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 7px 8px; background: none; border: 0; border-radius: var(--radius-s); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tp-history-item:hover { background: var(--panel-2); }
+.tp-history-cmd { font-size: 12px; color: var(--text); white-space: pre-wrap; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+@media (max-width: 1100px) {
+  .tp-snippets { width: 240px; }
+  .tp-history { width: 260px; }
+}
