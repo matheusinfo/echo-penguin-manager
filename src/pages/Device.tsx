@@ -1,103 +1,37 @@
-// "Alarme & Tela": the touch UI's alarm (/data/penguin/alarm.json), the screen and the speaker.
+// "Alarme & Tela": the touch UI's alarms (/data/penguin/alarms.json), the screen and the speaker.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlarmClock, Bell, BellOff, ChevronDown, ChevronUp, Info, Monitor, Moon, Play, RefreshCw, Save, Sun, TriangleAlert, Undo2, Volume2, Power,
+  AlarmClock, Bell, BellOff, ChevronDown, ChevronUp, Info, Monitor, Moon, Play, Plus, RefreshCw, Save, Sun, SunDim, Trash2,
+  TriangleAlert, Undo2, Volume2, Power,
 } from 'lucide-react';
 import { echo, run, runSections } from '../api';
 import { useApp, usePoll } from '../hooks';
-import { Badge, Button, Card, ErrorBox, Grid, Loading, NeedsConnection, Page, RefreshButton, Switch } from '../components/ui';
+import { Badge, Button, Card, Empty, ErrorBox, Grid, Loading, NeedsConnection, Page, RefreshButton, Switch } from '../components/ui';
 import {
-  ALARM_FILE, BACKLIGHT_SYS, DEFAULTS_FILE, SETTINGS_FILE, META_BY_KEY, parseConf, parseEffective, setCommand, validateSetting,
+  BACKLIGHT_SYS, DEFAULTS_FILE, SETTINGS_FILE, META_BY_KEY, parseConf, parseEffective, setCommand, validateSetting,
 } from './settings/lib';
 import { usePenguinActions } from './settings/actions';
+import {
+  ALARMS_FILE, ALARMS_READ_CMD, Alarm, AlarmsOnDevice, MAX_ALARMS, MUSIC_DIR, OLD_ALARM_FILE, REPEATS, alarmsJson, alarmsKey,
+  fmtUntil, isTrack, minutesUntil, newAlarm, nextAlarm, pad2 as pad, parseAlarms, parseAlarmsSection, soundLabel, sortAlarms,
+  validAlarm,
+} from './alarms';
 import './Device.css';
 
-// --- Alarm model (mirrors penguin-ui's Clocks).
-
-type Repeat = 'daily' | 'weekdays' | 'weekends' | 'once';
-/** sound: 'beep' or a file name in /data/penguin/music, chosen on the screen (kept as is here). */
-interface Alarm { on: boolean; h: number; m: number; repeat: Repeat; sound: string }
-const REPEATS: { id: Repeat; label: string; long: string }[] = [
-  { id: 'daily', label: 'Todo dia', long: 'todo dia' },
-  { id: 'weekdays', label: 'Seg–sex', long: 'de segunda a sexta' },
-  { id: 'weekends', label: 'Sáb e dom', long: 'sábado e domingo' },
-  { id: 'once', label: 'Uma vez', long: 'uma vez (desliga depois de tocar)' },
-];
-const DEFAULT_ALARM: Alarm = { on: false, h: 7, m: 0, repeat: 'daily', sound: 'beep' };
-
-/** What penguin-ui accepts as the alarm's sound (else it uses the beep). */
-const validSound = (v: unknown): v is string =>
-  typeof v === 'string' && v.length > 0 && v.length <= 255 && !v.includes('/') && !/[\x00-\x1f\x7f]/.test(v);
 const WD_SHORT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
-
-function parseAlarm(raw: string | null): { alarm: Alarm; problem: string | null } {
-  if (raw == null || raw.trim() === '') return { alarm: { ...DEFAULT_ALARM }, problem: raw == null ? 'arquivo ainda não existe (a tela usa 07:00, desligado)' : 'arquivo vazio' };
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    const j = (parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}) as Record<string, unknown>;
-    const a = { ...DEFAULT_ALARM, ...j } as Alarm;
-    let problem: string | null = parsed === j ? null : 'JSON não é um objeto (a tela usa os padrões)';
-    if (!validSound(a.sound)) a.sound = 'beep';
-    if (!REPEATS.some((r) => r.id === a.repeat)) { a.repeat = 'daily'; problem = `repeat "${j.repeat}" desconhecido (a tela usa "daily")`; }
-    if (!Number.isInteger(a.h) || a.h < 0 || a.h > 23 || !Number.isInteger(a.m) || a.m < 0 || a.m > 59 || typeof a.on !== 'boolean') {
-      problem = 'valores fora do formato esperado';
-      a.h = Math.min(23, Math.max(0, Math.floor(Number(a.h)) || 0));
-      a.m = Math.min(59, Math.max(0, Math.floor(Number(a.m)) || 0));
-      a.on = !!a.on;
-    }
-    // Only the known fields: anything else in the file is not carried into the draft.
-    return { alarm: { on: a.on, h: a.h, m: a.m, repeat: a.repeat, sound: a.sound }, problem };
-  } catch {
-    return { alarm: { ...DEFAULT_ALARM }, problem: 'JSON inválido (a tela usa os padrões)' };
-  }
-}
-
-const soundLabel = (v: string) => (v === 'beep' ? 'bipe' : v);
-const akey = (a: Alarm) => `${a.on}|${a.h}|${a.m}|${a.repeat}|${a.sound}`;
-const pad = (n: number) => String(n).padStart(2, '0');
-
-/** Same formatting as Python's json.dump, which penguin-ui uses. */
-function alarmJson(a: Alarm): string {
-  return `{"on": ${a.on ? 'true' : 'false'}, "h": ${a.h}, "m": ${a.m}, "repeat": ${JSON.stringify(a.repeat)}, "sound": ${JSON.stringify(a.sound)}}`;
-}
-
-function validAlarm(a: Alarm): string | null {
-  if (typeof a.on !== 'boolean') return 'on inválido';
-  if (!Number.isInteger(a.h) || a.h < 0 || a.h > 23) return 'hora deve ser 0–23';
-  if (!Number.isInteger(a.m) || a.m < 0 || a.m > 59) return 'minuto deve ser 0–59';
-  if (!REPEATS.some((r) => r.id === a.repeat)) return 'repetição inválida';
-  if (!validSound(a.sound)) return 'som do alarme inválido';
-  return null;
-}
-
-/**
- * Next ring, from the device's wall clock (a Date whose UTC fields are the Echo's local time).
- * Same rule as penguin-ui's until_alarm(): the current minute counts as "tomorrow".
- */
-function nextRing(a: Alarm, now: Date): { mins: number; at: Date } {
-  const today = now.getUTCHours() * 60 + now.getUTCMinutes();
-  let mins = a.h * 60 + a.m - today;
-  if (mins <= 0) mins += 1440;
-  const ringsOn = (sundayBased: number) => {
-    const py = (sundayBased + 6) % 7; // Python: Monday = 0
-    return a.repeat === 'weekdays' ? py < 5 : a.repeat === 'weekends' ? py >= 5 : true;
-  };
-  for (let i = 0; i < 8 && !ringsOn((now.getUTCDay() + Math.floor((today + mins) / 1440)) % 7); i++) mins += 1440;
-  const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  return { mins, at: new Date(start + (today + mins) * 60000) };
-}
-
-function fmtUntil(mins: number): string {
-  const d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60), m = mins % 60;
-  return (d ? `${d} d ` : '') + `${h} h ${pad(m)} min`;
-}
+/** The ambient light sensor's reading (echo-penguin's penguin-ui reads the same file). */
+const ALS_FILE = '/sys/bus/platform/drivers/als_ps/als';
 
 // --- Device state.
 
 interface DevState {
-  alarmRaw: string | null;
+  alarms: AlarmsOnDevice;
+  /** Tracks in /data/penguin/music an alarm can play. */
+  music: string[];
   bl: number | null;
   blMax: number;
+  /** The light sensor's reading (0–4095), null without a sensor. */
+  light: number | null;
   vol: number | null;
   volErr: string | null;
   effective: Record<string, string>;
@@ -110,15 +44,15 @@ interface DevState {
   tz: string;
 }
 
-const NOFILE = '@@NOFILE@@';
-
 /** What does not change while the page is open (the image's defaults, the panel's range): read once. */
 interface DevStatic { defaults: Record<string, string>; blMax: number }
 
 async function loadDevice(cache: { current: DevStatic | null }): Promise<DevState> {
   const s = await runSections({
-    alarm: `cat ${ALARM_FILE} 2>/dev/null || echo '${NOFILE}'`,
+    alarms: ALARMS_READ_CMD,
+    music: `ls -1 ${MUSIC_DIR} 2>/dev/null; true`,
     bl: `cat ${BACKLIGHT_SYS}/brightness`,
+    light: `cat ${ALS_FILE} 2>/dev/null; true`,
     vol: 'penguin-sound volume',
     eff: 'penguin settings',
     conf: `cat ${SETTINGS_FILE} 2>/dev/null; true`,
@@ -144,11 +78,15 @@ function buildDevState(s: Record<string, string>, st: DevStatic, int: (v: string
     const [Y, M, D, h, mi, se] = n.map(Number);
     clockOffset = Date.UTC(Y, M - 1, D, h, mi, se) - Date.now();
   }
-  const alarmRaw = s.alarm == null || s.alarm.trim() === NOFILE ? null : s.alarm;
+  const lightRaw = (s.light ?? '').trim();
+  const light = /^0x[0-9a-f]+$/i.test(lightRaw) ? parseInt(lightRaw, 16) : int(lightRaw);
   return {
-    alarmRaw,
+    alarms: parseAlarmsSection(s.alarms ?? ''),
+    music: (s.music ?? '').split('\n').map((x) => x.trim()).filter(isTrack)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })),
     bl: int(s.bl),
     blMax: st.blMax,
+    light,
     vol: int(s.vol),
     volErr: int(s.vol) == null ? (s.vol ?? '').trim() || 'sem resposta' : null,
     effective: parseEffective(s.eff ?? ''),
@@ -168,7 +106,7 @@ echo 'a interface (penguin-ui) não voltou em 15 s' >&2; exit 1`;
 export default function DevicePage() {
   const { connected } = useApp();
   return (
-    <Page title="Alarme & Tela" subtitle="O alarme, o brilho e o som do Echo (os mesmos da interface de toque)">
+    <Page title="Alarme & Tela" subtitle="Os alarmes, o brilho e o som do Echo (os mesmos da interface de toque)">
       <NeedsConnection connected={connected}><DeviceBody /></NeedsConnection>
     </Page>
   );
@@ -191,7 +129,7 @@ function DeviceBody() {
         <RefreshButton onClick={refresh} loading={loading} lastUpdated={lastUpdated} />
       </div>
       {error && <ErrorBox error={error} onRetry={refresh} />}
-      <AlarmCard data={data} refresh={refresh} />
+      <AlarmsCard data={data} refresh={refresh} />
       <Grid cols={2}>
         <ScreenCard data={data} refresh={refresh} busy={busy} act={act} confirm={confirm} toast={toast}
           onReboot={() => rebootEcho('Para aplicar as configurações de tela que só valem no boot.')}
@@ -205,31 +143,33 @@ function DeviceBody() {
 type ActFn = (key: string, fn: () => Promise<unknown>, okMsg?: string) => Promise<boolean>;
 
 // ------------------------------------------------------------------------------------------------
-// Alarm
+// Alarms
 
-function AlarmCard({ data, refresh }: { data: DevState; refresh: () => void }) {
+function AlarmsCard({ data, refresh }: { data: DevState; refresh: () => void }) {
   const { confirm, toast } = useApp();
-  const [base, setBase] = useState<{ raw: string | null; alarm: Alarm } | null>(null);
-  const [draft, setDraft] = useState<Alarm | null>(null);
+  const dev = data.alarms;
+  const legacy = dev.format === 1;
+  // An older penguin-ui always has its one alarm (07:00, off, when the file does not exist yet).
+  const deviceAlarms = useMemo(() => (legacy && dev.alarms.length === 0 ? [{ ...newAlarm(), on: false }] : dev.alarms), [dev, legacy]);
+  const [base, setBase] = useState<Alarm[] | null>(null);
+  const [draft, setDraft] = useState<Alarm[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [, setTick] = useState(0);
-
-  const device = useMemo(() => parseAlarm(data.alarmRaw), [data.alarmRaw]);
 
   // First load, and adopting changes made on the Echo while nothing is being edited here.
   useEffect(() => {
     if (!base || !draft) {
-      setBase({ raw: data.alarmRaw, alarm: device.alarm });
-      setDraft(device.alarm);
+      setBase(deviceAlarms);
+      setDraft(deviceAlarms);
       return;
     }
-    if (akey(device.alarm) !== akey(base.alarm) && akey(draft) === akey(base.alarm)) {
-      setBase({ raw: data.alarmRaw, alarm: device.alarm });
-      setDraft(device.alarm);
-      toast('O alarme foi alterado no Echo; valores atualizados', 'info');
+    if (alarmsKey(deviceAlarms) !== alarmsKey(base) && alarmsKey(draft) === alarmsKey(base)) {
+      setBase(deviceAlarms);
+      setDraft(deviceAlarms);
+      toast('Os alarmes foram alterados no Echo; valores atualizados', 'info');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [device]);
+  }, [deviceAlarms]);
 
   useEffect(() => {
     const t = setInterval(() => setTick((x) => x + 1), 15000);
@@ -238,50 +178,67 @@ function AlarmCard({ data, refresh }: { data: DevState; refresh: () => void }) {
 
   if (!base || !draft) return null;
 
-  const dirty = akey(draft) !== akey(base.alarm);
-  const conflict = dirty && akey(device.alarm) !== akey(base.alarm);
+  const dirty = alarmsKey(draft) !== alarmsKey(base);
+  const conflict = dirty && alarmsKey(deviceAlarms) !== alarmsKey(base);
   const now = data.clockOffset != null ? new Date(Date.now() + data.clockOffset) : null;
-  const next = now ? nextRing(draft, now) : null;
+  const next = now ? nextAlarm(draft, now) : null;
   const screenUiOff = (data.effective.SCREEN_UI ?? '1') !== '1';
-  const set = (p: Partial<Alarm>) => setDraft({ ...draft, ...p });
-  const fmtAlarm = (a: Alarm) => `${pad(a.h)}:${pad(a.m)}, ${REPEATS.find((r) => r.id === a.repeat)?.long}, ${a.on ? 'ligado' : 'desligado'}, som: ${soundLabel(a.sound)}`;
+  const limit = legacy ? 1 : MAX_ALARMS;
+  const update = (i: number, p: Partial<Alarm>) => setDraft(draft.map((a, j) => (j === i ? { ...a, ...p } : a)));
+  const remove = (i: number) => setDraft(draft.filter((_, j) => j !== i));
+  const add = () => setDraft([...draft, newAlarm()]);
+  const fmtAlarm = (a: Alarm) => `${pad(a.h)}:${pad(a.m)} ${REPEATS.find((r) => r.id === a.repeat)?.long}, ${a.on ? 'ligado' : 'desligado'}, som: ${soundLabel(a.sound)}`;
+  const fmtList = (l: Alarm[]) => (l.length ? l.map((a) => `• ${fmtAlarm(a)}`).join('\n') : '(nenhum)');
 
   const save = async () => {
-    const err = validAlarm(draft);
-    if (err) return toast(err, 'error');
-    const content = alarmJson(draft);
+    for (const a of draft) {
+      const err = validAlarm(a);
+      if (err) return toast(`${pad(a.h)}:${pad(a.m)}: ${err}`, 'error');
+    }
+    const list = sortAlarms(draft);
+    const file = legacy ? OLD_ALARM_FILE : ALARMS_FILE;
+    const content = alarmsJson(list, dev.format);
     // Validate what is about to be written.
-    const back = JSON.parse(content) as Alarm;
-    if (akey(back) !== akey(draft)) return toast('Falha ao gerar o JSON do alarme', 'error');
+    if (alarmsKey(parseAlarms(content, !legacy).alarms) !== alarmsKey(legacy ? list.slice(0, 1) : list)) {
+      return toast('Falha ao gerar o JSON dos alarmes', 'error');
+    }
 
-    let current: string | null = null;
+    let current: Alarm[] = deviceAlarms;
     try {
-      const r = await echo.exec(`cat ${ALARM_FILE} 2>/dev/null || echo '${NOFILE}'`);
-      current = r.stdout.trim() === NOFILE ? null : r.stdout;
-    } catch { /* keep null */ }
-    const curAlarm = parseAlarm(current).alarm;
-    const changedThere = akey(curAlarm) !== akey(base.alarm) && akey(curAlarm) !== akey(draft);
+      const r = await echo.exec(ALARMS_READ_CMD);
+      current = parseAlarmsSection(r.stdout).alarms;
+      if (legacy && current.length === 0) current = [{ ...newAlarm(), on: false }];
+    } catch { /* keep what the last poll saw */ }
+    const changedThere = alarmsKey(current) !== alarmsKey(base) && alarmsKey(current) !== alarmsKey(list);
 
-    const ok = await confirm({
-      title: 'Salvar alarme',
-      message:
-        (changedThere ? `⚠ O alarme foi alterado no Echo desde que você abriu esta página (agora: ${fmtAlarm(curAlarm)}). Salvar substitui essa mudança.\n\n` : '') +
-        `Novo alarme: ${fmtAlarm(draft)}.\n\n` +
-        `O arquivo ${ALARM_FILE} é gravado e a interface da tela (penguin-ui) é reiniciada para carregar o novo alarme — ela só o lê ao iniciar.\n\n` +
-        'Ao reiniciar a interface: o cronômetro e o timer da tela são zerados, e um alarme ou timer que esteja tocando para. A tela volta à tela inicial em 1–2 s.',
-      confirmLabel: 'Salvar e reiniciar a interface',
-      danger: changedThere,
-    });
-    if (!ok) return;
+    // A newer penguin-ui reloads the file by itself: no restart, so ask only when it overwrites a
+    // change made on the Echo. An older one only reads it at start: it is restarted, so always ask.
+    if (changedThere || legacy) {
+      const ok = await confirm({
+        title: legacy ? 'Salvar alarme' : 'Salvar alarmes',
+        message:
+          (changedThere ? `⚠ Os alarmes foram alterados no Echo desde que você abriu esta página. Agora:\n${fmtList(current)}\n\nSalvar substitui essa mudança.\n\n` : '') +
+          `Novos alarmes:\n${fmtList(list)}\n\n` +
+          (legacy
+            ? `O arquivo ${file} é gravado e a interface da tela (penguin-ui) é reiniciada para carregá-lo — esta versão do echo-penguin só o lê ao iniciar. O cronômetro e o timer da tela são zerados, e um alarme ou timer tocando para.`
+            : `O arquivo ${file} é gravado; a tela recarrega os alarmes sozinha.`),
+        confirmLabel: legacy ? 'Salvar e reiniciar a interface' : 'Salvar',
+        danger: changedThere,
+      });
+      if (!ok) return;
+    }
     setSaving(true);
     try {
       await run('mkdir -p /data/penguin');
-      await echo.writeFile(ALARM_FILE, content);
-      const written = (await run(`cat ${ALARM_FILE}`)).trim();
-      if (akey(parseAlarm(written).alarm) !== akey(draft)) throw new Error('O arquivo gravado não confere; tente de novo');
-      await run(RESTART_UI, { timeout: 30000 });
-      setBase({ raw: written, alarm: draft });
-      toast(draft.on && next ? `Alarme salvo: toca em ${fmtUntil(next.mins)}` : 'Alarme salvo', 'ok');
+      await echo.writeFile(file, content);
+      const written = (await run(`cat ${file}`)).trim();
+      const back = parseAlarms(written, !legacy).alarms;
+      if (alarmsKey(back) !== alarmsKey(legacy ? list.slice(0, 1) : list)) throw new Error('O arquivo gravado não confere; tente de novo');
+      if (legacy) await run(RESTART_UI, { timeout: 30000 });
+      setBase(back);
+      setDraft(back);
+      const n = now ? nextAlarm(back, now) : null;
+      toast(n ? `Alarmes salvos: o próximo toca em ${fmtUntil(n.mins)}` : back.length ? 'Alarmes salvos (todos desligados)' : 'Alarmes salvos (nenhum)', 'ok');
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e), 'error');
     } finally {
@@ -309,73 +266,109 @@ function AlarmCard({ data, refresh }: { data: DevState; refresh: () => void }) {
   };
 
   const reload = () => {
-    setBase({ raw: data.alarmRaw, alarm: device.alarm });
-    setDraft(device.alarm);
+    setBase(deviceAlarms);
+    setDraft(deviceAlarms);
   };
 
   return (
-    <Card title="Alarme" icon={<AlarmClock size={16} />}
+    <Card title="Alarmes" icon={<AlarmClock size={16} />}
       actions={<>
         {dirty && <Badge tone="warn">não salvo</Badge>}
-        <Button size="s" variant="ghost" icon={<RefreshCw size={13} />} busy={saving && !dirty} onClick={restartUi} title="killall penguin-ui (o init reinicia)">Reiniciar interface</Button>
+        <span className="muted small">{draft.length} de {limit}</span>
+        {legacy && <Button size="s" variant="ghost" icon={<RefreshCw size={13} />} busy={saving && !dirty} onClick={restartUi} title="killall penguin-ui (o init reinicia)">Reiniciar interface</Button>}
       </>}>
       <div className="col gap-m">
         {conflict && (
           <div className="dv-note warn">
             <TriangleAlert size={15} />
-            <div className="grow">O alarme mudou no Echo enquanto você editava (agora: {fmtAlarm(device.alarm)}).</div>
-            <Button size="s" onClick={reload}>Usar o do Echo</Button>
+            <div className="grow">Os alarmes mudaram no Echo enquanto você editava.</div>
+            <Button size="s" onClick={reload}>Usar os do Echo</Button>
           </div>
         )}
         {screenUiOff && (
-          <div className="dv-note warn"><TriangleAlert size={15} /><div>SCREEN_UI=0: a interface de toque não roda, então o alarme <b>não toca</b>. Ligue “Interface de toque” abaixo e reinicie o Echo.</div></div>
+          <div className="dv-note warn"><TriangleAlert size={15} /><div>SCREEN_UI=0: a interface de toque não roda, então os alarmes <b>não tocam</b>. Ligue “Interface de toque” abaixo e reinicie o Echo.</div></div>
         )}
-        {device.problem && <div className="dv-note"><Info size={15} /><div>{ALARM_FILE}: {device.problem}.</div></div>}
+        {legacy && (
+          <div className="dv-note info"><Info size={15} /><div>Este Echo roda uma versão do echo-penguin anterior à v0.2.9, que tem <b>um alarme só</b> e o lê ao iniciar a interface. Atualize o sistema do Echo para ter até {MAX_ALARMS} alarmes.</div></div>
+        )}
+        {dev.problem && <div className="dv-note"><Info size={15} /><div>{dev.file}: {dev.problem}.</div></div>}
 
-        <div className="dv-alarm">
-          <div className={`dv-clock ${draft.on ? '' : 'off'}`}>
-            <TimeUnit label="hora" value={draft.h} max={23} onChange={(h) => set({ h })} />
-            <span className="dv-colon">:</span>
-            <TimeUnit label="min" value={draft.m} max={59} onChange={(m) => set({ m })} bigStep={10} />
+        {draft.length === 0 ? (
+          <Empty>Nenhum alarme. Adicione um abaixo.</Empty>
+        ) : (
+          <div className="dv-alarms">
+            {draft.map((a, i) => (
+              <AlarmRow key={i} alarm={a} music={data.music} now={now} isNext={next?.index === i}
+                onChange={(p) => update(i, p)} onRemove={legacy ? undefined : () => remove(i)} />
+            ))}
           </div>
-          <div className="col gap-m">
-            <div className="row gap-m wrap">
-              <Switch checked={draft.on} onChange={(on) => set({ on })} label={draft.on ? <b>Alarme ligado</b> : 'Alarme desligado'} />
-            </div>
-            <div className="dv-seg">
-              {REPEATS.map((r) => (
-                <button key={r.id} className={draft.repeat === r.id ? 'active' : ''} onClick={() => set({ repeat: r.id })}>{r.label}</button>
-              ))}
-            </div>
-            {draft.on && next ? (
-              <div>
-                <div className="dv-next"><Bell size={18} style={{ verticalAlign: -3 }} /> Toca em {fmtUntil(next.mins)}</div>
-                <div className="muted small">
-                  {WD_SHORT[next.at.getUTCDay()]}, {pad(next.at.getUTCDate())}/{pad(next.at.getUTCMonth() + 1)} às {pad(draft.h)}:{pad(draft.m)} (hora do Echo)
-                  {draft.repeat === 'once' && ' · depois de tocar ele se desliga'}
-                </div>
-              </div>
-            ) : (
-              <div className="dv-next off"><BellOff size={16} style={{ verticalAlign: -3 }} /> {draft.on ? 'Hora do Echo desconhecida' : 'Não vai tocar'}</div>
-            )}
-            <div className="row gap-s">
-              <Button variant="primary" icon={<Save size={14} />} busy={saving} disabled={!dirty} onClick={save}>Salvar</Button>
-              {dirty && <Button icon={<Undo2 size={14} />} onClick={() => setDraft(base.alarm)}>Desfazer</Button>}
-            </div>
+        )}
+
+        <div className="row between wrap gap-s">
+          <Button icon={<Plus size={14} />} disabled={draft.length >= limit} onClick={add}
+            title={draft.length >= limit ? `No máximo ${limit} (o que cabe na tela do Echo)` : undefined}>Adicionar alarme</Button>
+          <div className="row gap-s">
+            {dirty && <Button icon={<Undo2 size={14} />} onClick={() => setDraft(base)}>Desfazer</Button>}
+            <Button variant="primary" icon={<Save size={14} />} busy={saving} disabled={!dirty} onClick={save}>Salvar</Button>
           </div>
         </div>
-        <div className="muted small">
-          Som: <b>{soundLabel(draft.sound)}</b> (escolhido na tela do Echo; mantido ao salvar daqui).
+
+        <div className="dv-next-line">
+          {next ? (
+            <><Bell size={16} style={{ verticalAlign: -3 }} /> Próximo: <b>{WD_SHORT[next.at.getUTCDay()]}, {pad(next.at.getUTCDate())}/{pad(next.at.getUTCMonth() + 1)} às {pad(draft[next.index].h)}:{pad(draft[next.index].m)}</b> <span className="muted">(em {fmtUntil(next.mins)}, hora do Echo)</span></>
+          ) : (
+            <span className="muted"><BellOff size={15} style={{ verticalAlign: -3 }} /> {draft.some((a) => a.on) ? 'Hora do Echo desconhecida' : 'Nenhum alarme vai tocar'}</span>
+          )}
         </div>
         <div className="muted small">
-          No Echo: <code className="mono">{data.alarmRaw?.trim() ?? '(sem arquivo)'}</code> — toca por até 10 min; os botões de volume ou um toque param o alarme.
+          {legacy
+            ? <>No Echo: <code className="mono">{dev.raw ?? '(sem arquivo)'}</code>.</>
+            : <>Gravados em <code className="mono">{ALARMS_FILE}</code>; a tela os recarrega sozinha. Músicas: arquivos .mp3/.wav em <code className="mono">{MUSIC_DIR}</code>.</>}
+          {' '}Cada alarme toca por até 10 min; os botões de volume ou um toque na tela param o alarme.
         </div>
       </div>
     </Card>
   );
 }
 
-function TimeUnit({ label, value, max, onChange, bigStep }: { label: string; value: number; max: number; onChange: (v: number) => void; bigStep?: number }) {
+function AlarmRow({ alarm: a, music, now, isNext, onChange, onRemove }: {
+  alarm: Alarm; music: string[]; now: Date | null; isNext: boolean;
+  onChange: (p: Partial<Alarm>) => void; onRemove?: () => void;
+}) {
+  const missing = a.sound !== 'beep' && !music.includes(a.sound);
+  return (
+    <div className={`dv-arow ${a.on ? '' : 'off'} ${isNext ? 'next' : ''}`}>
+      <div className="dv-clock compact">
+        <TimeUnit label="hora" value={a.h} max={23} onChange={(h) => onChange({ h })} compact />
+        <span className="dv-colon">:</span>
+        <TimeUnit label="min" value={a.m} max={59} onChange={(m) => onChange({ m })} bigStep={10} compact />
+      </div>
+      <div className="col gap-s dv-arow-main">
+        <div className="row gap-m wrap">
+          <Switch checked={a.on} onChange={(on) => onChange({ on })} label={a.on ? <b>Ligado</b> : 'Desligado'} />
+          <div className="dv-seg">
+            {REPEATS.map((r) => (
+              <button key={r.id} className={a.repeat === r.id ? 'active' : ''} onClick={() => onChange({ repeat: r.id })}>{r.label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="row gap-s wrap">
+          <select className="input dv-sound" value={a.sound} onChange={(e) => onChange({ sound: e.target.value })} aria-label="som do alarme">
+            <option value="beep">Bipe (embutido)</option>
+            {music.map((t) => <option key={t} value={t}>{soundLabel(t)}</option>)}
+            {missing && <option value={a.sound}>{soundLabel(a.sound)} (arquivo não encontrado: toca o bipe)</option>}
+          </select>
+          <span className="muted small">
+            {a.on && now ? <>toca em {fmtUntil(minutesUntil(a, now))}{a.repeat === 'once' && ', depois se desliga'}</> : a.on ? '' : 'não vai tocar'}
+          </span>
+        </div>
+      </div>
+      {onRemove && <Button size="s" variant="ghost" icon={<Trash2 size={14} />} onClick={onRemove} title="Remover este alarme (vale ao salvar)" />}
+    </div>
+  );
+}
+
+function TimeUnit({ label, value, max, onChange, bigStep, compact }: { label: string; value: number; max: number; onChange: (v: number) => void; bigStep?: number; compact?: boolean }) {
   const [text, setText] = useState(pad(value));
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) setText(pad(value)); }, [value]);
@@ -386,8 +379,8 @@ function TimeUnit({ label, value, max, onChange, bigStep }: { label: string; val
     setText(pad(/^\d{1,2}$/.test(text) && n <= max ? n : value));
   };
   return (
-    <div className="dv-unit">
-      <button onClick={() => onChange(wrap(value + 1))} title="+1"><ChevronUp size={18} /></button>
+    <div className={`dv-unit ${compact ? 'compact' : ''}`}>
+      <button onClick={() => onChange(wrap(value + 1))} title="+1"><ChevronUp size={compact ? 14 : 18} /></button>
       <input className="dv-digits" value={text} inputMode="numeric" maxLength={2} aria-label={label}
         onFocus={(e) => { focused.current = true; e.target.select(); }}
         onBlur={() => { focused.current = false; commit(); }}
@@ -402,8 +395,8 @@ function TimeUnit({ label, value, max, onChange, bigStep }: { label: string; val
           if (e.key === 'ArrowDown') { e.preventDefault(); onChange(wrap(value - (e.shiftKey && bigStep ? bigStep : 1))); }
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         }} />
-      <button onClick={() => onChange(wrap(value - 1))} title="−1"><ChevronDown size={18} /></button>
-      <span className="dv-unit-label">{label}{bigStep ? ' (shift ±10)' : ''}</span>
+      <button onClick={() => onChange(wrap(value - 1))} title="−1"><ChevronDown size={compact ? 14 : 18} /></button>
+      {!compact && <span className="dv-unit-label">{label}{bigStep ? ' (shift ±10)' : ''}</span>}
     </div>
   );
 }
@@ -421,8 +414,12 @@ function ScreenCard({ data, refresh, busy, act, confirm, toast, onReboot, onGoMa
   const [needBoot, setNeedBoot] = useState(false);
   const live = data.bl ?? 0;
   const shown = bl ?? live;
-  const saved = Number(data.effective.BACKLIGHT ?? '90');
+  const eff = data.effective;
+  const saved = Number(eff.BACKLIGHT ?? '90');
   const max = data.blMax || 255;
+  // echo-penguin v0.2.9+: automatic brightness, and a screen turned off from here wakes on a tap.
+  const autoSupported = 'AUTO_BRIGHTNESS' in data.defaults;
+  const auto = autoSupported && eff.AUTO_BRIGHTNESS === '1' && saved > 0;
 
   const writeBl = async (n: number) => {
     const v = Math.max(0, Math.min(max, Math.round(n)));
@@ -458,10 +455,19 @@ function ScreenCard({ data, refresh, busy, act, confirm, toast, onReboot, onGoMa
     await writeBl(target);
   };
 
+  /** A brightness setting the screen picks up by itself within seconds (penguin-ui re-reads them). */
+  const setLive = async (key: string, value: number, okMsg: string, also: Record<string, string> = {}) => {
+    const bad = validateSetting(META_BY_KEY[key], String(value), { ...eff, ...also, [key]: String(value) });
+    if (bad) { toast(`${key}: ${bad}`, 'error'); return false; }
+    const ok = await act(key, () => run(setCommand(key, String(value), data.defaults[key])), okMsg);
+    refresh();
+    return ok;
+  };
+
   const setScreen = async (key: 'SCREEN_UI' | 'SCREEN_MIRROR' | 'SCREEN_LOGLEVEL', value: string) => {
     if (key === 'SCREEN_UI' && value === '0' && !(await confirm({
       title: 'Desligar a interface de toque',
-      message: 'Com SCREEN_UI=0 a tela passa a mostrar só o console de logs: sem relógio, sem botões e o ALARME NÃO TOCA.\n\nVale depois de reiniciar o Echo.',
+      message: 'Com SCREEN_UI=0 a tela passa a mostrar só o console de logs: sem relógio, sem botões, sem brilho automático e os ALARMES NÃO TOCAM.\n\nVale depois de reiniciar o Echo.',
       confirmLabel: 'Desligar interface', danger: true,
     }))) return;
     const ok = await act(key, () => run(setCommand(key, value, data.defaults[key])),
@@ -470,36 +476,56 @@ function ScreenCard({ data, refresh, busy, act, confirm, toast, onReboot, onGoMa
     refresh();
   };
 
-  const eff = data.effective;
   const loglevelLive = data.printk;
   const custom = (k: string) => k in data.overrides && <Badge tone="info">personalizado</Badge>;
 
   return (
     <Card title="Tela" icon={<Monitor size={16} />}>
       <div className="col gap-m">
+        {autoSupported && (
+          <div className="dv-opt">
+            <div>
+              <div className="dv-opt-title">Brilho automático <span className="mono muted small">AUTO_BRIGHTNESS</span>{custom('AUTO_BRIGHTNESS')}</div>
+              <div className="dv-opt-desc">A tela segue a luz do ambiente pelo sensor de luz: escurece quando a luz do quarto apaga e volta a clarear com ela.</div>
+            </div>
+            <Switch checked={auto} disabled={busy === 'AUTO_BRIGHTNESS' || saved === 0} onChange={(v) =>
+              setLive('AUTO_BRIGHTNESS', v ? 1 : 0, v ? 'Brilho automático ligado (a tela aplica em alguns segundos)' : 'Brilho automático desligado')} />
+          </div>
+        )}
+
+        {auto ? (
+          <AutoBrightness data={data} busy={busy} setLive={setLive} />
+        ) : (
+          <div className="col gap-s">
+            <div className="row between">
+              <span className="field-label">Brilho {data.bl === 0 && <Badge tone="warn">tela desligada</Badge>}</span>
+              <span className="muted small">padrão no boot (BACKLIGHT): {saved}{custom('BACKLIGHT')}</span>
+            </div>
+            <div className="dv-slider">
+              <Moon size={16} className="muted" />
+              <input type="range" min={0} max={max} value={shown}
+                onChange={(e) => setBl(Number(e.target.value))}
+                onPointerUp={commitSlider} onKeyUp={commitSlider} />
+              <Sun size={18} className="muted" />
+              <span className="dv-val">{shown}<span className="muted small"> / {max}</span></span>
+            </div>
+            <span className="field-hint">Aplicado na hora ao soltar o controle. A interface da tela usa no mínimo 10 em seus botões.</span>
+            <div className="row gap-s wrap">
+              <Button size="s" icon={<Save size={13} />} busy={busy === 'bldef'} disabled={shown === saved} onClick={saveDefault}>Salvar como padrão</Button>
+            </div>
+          </div>
+        )}
+
         <div className="col gap-s">
-          <div className="row between">
-            <span className="field-label">Brilho {data.bl === 0 && <Badge tone="warn">tela desligada</Badge>}</span>
-            <span className="muted small">padrão no boot (BACKLIGHT): {saved}{custom('BACKLIGHT')}</span>
-          </div>
-          <div className="dv-slider">
-            <Moon size={16} className="muted" />
-            <input type="range" min={0} max={max} value={shown}
-              onChange={(e) => setBl(Number(e.target.value))}
-              onPointerUp={commitSlider} onKeyUp={commitSlider} />
-            <Sun size={18} className="muted" />
-            <span className="dv-val">{shown}<span className="muted small"> / {max}</span></span>
-          </div>
-          <span className="field-hint">Aplicado na hora ao soltar o controle. A interface da tela usa no mínimo 10 em seus botões.</span>
           <div className="row gap-s wrap">
-            <Button size="s" icon={<Save size={13} />} busy={busy === 'bldef'} disabled={shown === saved} onClick={saveDefault}>Salvar como padrão</Button>
             {live > 0
               ? <Button size="s" icon={<Power size={13} />} busy={busy === 'bl'} onClick={screenOff}>Desligar tela</Button>
               : <Button size="s" variant="primary" icon={<Power size={13} />} busy={busy === 'bl'} onClick={screenOn}>Ligar tela</Button>}
+            {auto && <span className="muted small">Agora: {live} / {max}</span>}
           </div>
-          {live === 0 && (
-            <div className="dv-note"><Info size={15} /><div>Com a tela desligada por aqui, um toque nela não a religa (a interface não sabe que está escura) e pode acionar um botão invisível. O alarme não religa a tela neste caso — use “Ligar tela”.</div></div>
-          )}
+          {live === 0 && (autoSupported
+            ? <div className="dv-note"><Info size={15} /><div>A tela está desligada. Um toque nela a religa, e um alarme tocando também.</div></div>
+            : <div className="dv-note"><Info size={15} /><div>Com a tela desligada por aqui, um toque nela não a religa (a interface não sabe que está escura) e pode acionar um botão invisível. O alarme não religa a tela neste caso — use “Ligar tela”.</div></div>)}
         </div>
 
         <div>
@@ -541,6 +567,98 @@ function ScreenCard({ data, refresh, busy, act, confirm, toast, onReboot, onGoMa
         )}
       </div>
     </Card>
+  );
+}
+
+/** The two levels automatic brightness moves between, and the sensor's thresholds, set from here. */
+function AutoBrightness({ data, busy, setLive }: {
+  data: DevState; busy: string | null;
+  setLive: (key: string, value: number, okMsg: string, also?: Record<string, string>) => Promise<boolean>;
+}) {
+  const eff = data.effective;
+  const num = (k: string, d: number) => (/^\d+$/.test(eff[k] ?? '') ? Number(eff[k]) : d);
+  const hi = num('BACKLIGHT', 90);
+  const lo = Math.min(hi, num('BACKLIGHT_DARK', 10));
+  const dark = num('LIGHT_DARK', 3);
+  const bright = num('LIGHT_BRIGHT', 80);
+  const [hiDraft, setHi] = useState<number | null>(null);
+  const [loDraft, setLo] = useState<number | null>(null);
+  const light = data.light;
+  const custom = (k: string) => k in data.overrides && <Badge tone="info">personalizado</Badge>;
+
+  const commitHi = () => {
+    if (hiDraft == null || hiDraft === hi) return setHi(null);
+    setLive('BACKLIGHT', hiDraft, `Brilho no ambiente claro: ${hiDraft}`).then(() => setHi(null));
+  };
+  const commitLo = () => {
+    if (loDraft == null || loDraft === lo) return setLo(null);
+    setLive('BACKLIGHT_DARK', loDraft, `Brilho no ambiente escuro: ${loDraft}`).then(() => setLo(null));
+  };
+
+  // Calibration from the reading now: "this is dark" / "this is a lit room".
+  const thisIsDark = async () => {
+    if (light == null) return;
+    // A margin above the reading, so the sensor's small swings in the dark still count as dark.
+    const v = Math.min(4000, light + Math.max(2, Math.round(light * 0.2)));
+    let b = bright;
+    if (v >= bright) {
+      b = Math.min(4095, Math.max(v + 1, v * 4));
+      if (!(await setLive('LIGHT_BRIGHT', b, `Claro: leituras a partir de ${b}`, { LIGHT_DARK: String(dark) }))) return;
+    }
+    await setLive('LIGHT_DARK', v, `Escuro: leituras até ${v}`, { LIGHT_BRIGHT: String(b) });
+  };
+  const thisIsLit = () => {
+    if (light == null) return;
+    const v = Math.max(dark + 1, light);
+    return setLive('LIGHT_BRIGHT', Math.min(4095, v), `Claro: leituras a partir de ${v}`);
+  };
+
+  return (
+    <div className="col gap-m">
+      <div className="col gap-s">
+        <div className="row between">
+          <span className="field-label">Ambiente claro {custom('BACKLIGHT')}</span>
+          <span className="muted small mono">BACKLIGHT</span>
+        </div>
+        <div className="dv-slider">
+          <SunDim size={16} className="muted" />
+          <input type="range" min={10} max={255} value={hiDraft ?? hi} disabled={busy === 'BACKLIGHT'}
+            onChange={(e) => setHi(Number(e.target.value))} onPointerUp={commitHi} onKeyUp={commitHi} />
+          <Sun size={18} className="muted" />
+          <span className="dv-val">{hiDraft ?? hi}<span className="muted small"> / 255</span></span>
+        </div>
+      </div>
+      <div className="col gap-s">
+        <div className="row between">
+          <span className="field-label">Ambiente escuro {custom('BACKLIGHT_DARK')}</span>
+          <span className="muted small mono">BACKLIGHT_DARK</span>
+        </div>
+        <div className="dv-slider">
+          <Moon size={16} className="muted" />
+          <input type="range" min={1} max={Math.max(1, hi)} value={Math.min(loDraft ?? lo, hi)} disabled={busy === 'BACKLIGHT_DARK'}
+            onChange={(e) => setLo(Number(e.target.value))} onPointerUp={commitLo} onKeyUp={commitLo} />
+          <SunDim size={18} className="muted" />
+          <span className="dv-val">{loDraft ?? lo}<span className="muted small"> / 255</span></span>
+        </div>
+        <span className="field-hint">Salvos ao soltar; a tela aplica em alguns segundos, com uma transição suave.</span>
+      </div>
+      <div className="dv-note">
+        <Info size={15} />
+        <div className="grow col gap-s">
+          <div>
+            Luz ambiente agora: <b>{light ?? 'sem sensor'}</b>{light != null && <span className="muted"> (0–4095)</span>}.
+            Escuro até <b>{dark}</b> <span className="mono muted small">LIGHT_DARK</span>, claro a partir de <b>{bright}</b> <span className="mono muted small">LIGHT_BRIGHT</span>; entre os dois, o brilho é intermediário.
+          </div>
+          <div className="row gap-s wrap">
+            <Button size="s" icon={<Moon size={13} />} disabled={light == null} busy={busy === 'LIGHT_DARK'} onClick={thisIsDark}
+              title="Com a luz do quarto apagada: as leituras até um pouco acima desta contam como escuro">Está escuro agora</Button>
+            <Button size="s" icon={<Sun size={13} />} disabled={light == null} busy={busy === 'LIGHT_BRIGHT'} onClick={thisIsLit}
+              title="Com o quarto aceso: esta leitura e as maiores contam como claro">Está claro agora</Button>
+          </div>
+          <span className="field-hint">Use “Está escuro agora” com a luz do quarto apagada se a tela continuar forte; a leitura é atualizada a cada 30 s (ou em Atualizar).</span>
+        </div>
+      </div>
+    </div>
   );
 }
 

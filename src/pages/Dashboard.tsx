@@ -12,6 +12,7 @@ import {
   Badge, Button, Card, Dot, Empty, ErrorBox, Grid, KV, Loading, Meter, NeedsConnection, Page, Pre, RefreshButton,
   Sparkline, Stat, toneFor,
 } from '../components/ui';
+import { Alarm, AlarmsOnDevice, ALARMS_READ_CMD, nextAlarm, parseAlarmsSection } from './alarms';
 import './Dashboard.css';
 
 type Tone = 'ok' | 'warn' | 'bad' | 'info' | 'muted';
@@ -24,7 +25,6 @@ interface Disk { mount: string; total: number | null; used: number | null; avail
 interface Wifi { ip: string | null; connected: boolean; ssid: string | null; signal: number | null; freq: number | null; bitrate: string | null }
 interface Ctr { name: string; state: string; status: string; image: string; health: 'healthy' | 'unhealthy' | 'starting' | null }
 interface SlotInfo { name: string; state: string; release: string }
-interface Alarm { on: boolean; h: number; m: number; repeat: string }
 
 interface Slow {
   release: string | null;
@@ -33,8 +33,7 @@ interface Slow {
   active: string | null;
   booted: string | null;
   slots: SlotInfo[];
-  alarm: Alarm | null;
-  alarmError: string | null;
+  alarms: AlarmsOnDevice | null;
   logLines: string[];
   crashCount: number | null;
   crashLatest: number | null; // epoch seconds
@@ -113,8 +112,8 @@ const FAST: Record<string, string> = {
 const SLOW: Record<string, string> = {
   info: 'cat /etc/techo5-release 2>/dev/null | head -n 1; uname -r; cat /run/techo5/slot 2>/dev/null || echo',
   slot: 'slotctl status 2>/dev/null',
-  // alarm.json has no trailing newline: echo one so the next section marker starts its own line.
-  alarm: 'f=/data/penguin/alarm.json; if [ -r "$f" ]; then cat "$f"; echo; else echo "@@none"; fi',
+  // The alarm file has no trailing newline: the command echoes one so the next section marker starts its own line.
+  alarms: ALARMS_READ_CMD,
   sup: `tail -n 500 /data/penguin/logs/supervisor.log 2>/dev/null | grep -iE ${shq(LOG_FILTER)} | tail -n 8`,
   crash:
     'd=/data/techo5-linux/crash; ls "$d" 2>/dev/null | wc -l; ' +
@@ -233,22 +232,7 @@ function parseSlow(s: Record<string, string>): Slow {
     if (b) booted = b[1];
   }
 
-  let alarm: Alarm | null = null;
-  let alarmError: string | null = null;
-  const araw = (s.alarm ?? '').trim();
-  if (araw && araw !== '@@none') {
-    try {
-      const j = JSON.parse(araw);
-      alarm = {
-        on: !!j.on,
-        h: Number.isFinite(j.h) ? j.h : 7,
-        m: Number.isFinite(j.m) ? j.m : 0,
-        repeat: typeof j.repeat === 'string' && REPEAT_LABEL[j.repeat] ? j.repeat : 'daily',
-      };
-    } catch {
-      alarmError = 'alarm.json inválido';
-    }
-  }
+  const alarms = s.alarms != null ? parseAlarmsSection(s.alarms) : null;
 
   const crashLines = (s.crash ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
   return {
@@ -258,8 +242,7 @@ function parseSlow(s: Record<string, string>): Slow {
     active,
     booted,
     slots,
-    alarm,
-    alarmError,
+    alarms,
     logLines: (s.sup ?? '').split('\n').filter((l) => l.trim()),
     crashCount: num(crashLines[0]),
     crashLatest: num(crashLines[1]),
@@ -338,24 +321,19 @@ function computeHealth(d: Snapshot): { level: 'ok' | 'warn' | 'bad'; reasons: Re
 
 // ---------------------------------------------------------------- alarm
 
-/** Next ring in the device's local time. Returns label + minutes from now. */
-function nextAlarm(a: Alarm, devEpoch: number | null, tzOffsetMin: number | null): { label: string; inMin: number } | null {
-  if (!a.on) return null;
+/** Next ring of any alarm in the device's local time. Returns label + minutes from now. */
+function nextRing(alarms: Alarm[], devEpoch: number | null, tzOffsetMin: number | null): { alarm: Alarm; label: string; inMin: number } | null {
   const epochMs = (devEpoch ?? Date.now() / 1000) * 1000;
   const off = tzOffsetMin ?? -new Date().getTimezoneOffset();
   // A Date whose UTC fields read as the device's wall clock.
   const now = new Date(epochMs + off * 60000);
-  const ringsOn = (jsDay: number) =>
-    a.repeat === 'weekdays' ? jsDay >= 1 && jsDay <= 5 : a.repeat === 'weekends' ? jsDay === 0 || jsDay === 6 : true;
-  for (let i = 0; i <= 7; i++) {
-    const c = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + i, a.h, a.m, 0));
-    if (c.getTime() <= now.getTime()) continue;
-    if (!ringsOn(c.getUTCDay())) continue;
-    const inMin = Math.round((c.getTime() - now.getTime()) / 60000);
-    const day = i === 0 ? 'hoje' : i === 1 ? 'amanhã' : WEEKDAYS[c.getUTCDay()];
-    return { label: `${day} às ${pad2(a.h)}:${pad2(a.m)}`, inMin };
-  }
-  return null;
+  const n = nextAlarm(alarms, now);
+  if (!n) return null;
+  const a = alarms[n.index];
+  const days = Math.round((Date.UTC(n.at.getUTCFullYear(), n.at.getUTCMonth(), n.at.getUTCDate()) -
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) / 86400000);
+  const day = days === 0 ? 'hoje' : days === 1 ? 'amanhã' : WEEKDAYS[n.at.getUTCDay()];
+  return { alarm: a, label: `${day} às ${pad2(a.h)}:${pad2(a.m)}`, inMin: n.mins };
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -777,28 +755,31 @@ function ContainersCard({ data, navigate }: { data: Snapshot; navigate: ReturnTy
 
 function AlarmCard({ data, navigate }: { data: Snapshot; navigate: ReturnType<typeof useApp>['navigate'] }) {
   const slow = data.slow;
-  const a = slow?.alarm ?? null;
-  const next = a ? nextAlarm(a, data.devEpoch, data.tzOffsetMin) : null;
+  const list = slow?.alarms?.alarms ?? [];
+  const on = list.filter((a) => a.on).length;
+  const next = nextRing(list, data.devEpoch, data.tzOffsetMin);
+  const shown = next?.alarm ?? list[0] ?? null;
   return (
-    <Card title="Alarme" icon={a?.on ? <AlarmClock size={15} /> : <AlarmClockOff size={15} />}
+    <Card title={list.length > 1 ? 'Alarmes' : 'Alarme'} icon={on ? <AlarmClock size={15} /> : <AlarmClockOff size={15} />}
       actions={<Button size="s" variant="ghost" onClick={() => navigate('device')} icon={<ChevronRight size={14} />}>Alarme & Tela</Button>}>
       {!slow && <Loading />}
-      {slow && slow.alarmError && <ErrorBox error={slow.alarmError} />}
-      {slow && !a && !slow.alarmError && <Empty>Nenhum alarme configurado</Empty>}
-      {a && (
+      {slow?.alarms?.problem && <ErrorBox error={`${slow.alarms.file}: ${slow.alarms.problem}`} />}
+      {slow && !shown && <Empty>Nenhum alarme configurado</Empty>}
+      {shown && (
         <div className="col gap-s">
           <div className="row gap-m">
-            <span className={`dash-alarm-time ${a.on ? '' : 'off'}`}>{pad2(a.h)}:{pad2(a.m)}</span>
+            <span className={`dash-alarm-time ${shown.on ? '' : 'off'}`}>{pad2(shown.h)}:{pad2(shown.m)}</span>
             <div className="col gap-s">
-              <Badge tone={a.on ? 'ok' : 'muted'}>{a.on ? 'ligado' : 'desligado'}</Badge>
-              <span className="muted small">{REPEAT_LABEL[a.repeat] ?? a.repeat}</span>
+              <Badge tone={shown.on ? 'ok' : 'muted'}>{shown.on ? 'ligado' : 'desligado'}</Badge>
+              <span className="muted small">{REPEAT_LABEL[shown.repeat] ?? shown.repeat}</span>
             </div>
           </div>
           <div className="small">
             {next
               ? <>Próximo toque: <strong>{next.label}</strong> <span className="muted">(em {fmtDuration(next.inMin * 60)})</span></>
-              : <span className="muted">{a.on ? 'Sem próximo toque calculável' : 'O alarme não vai tocar'}</span>}
+              : <span className="muted">{list.length > 1 ? 'Todos os alarmes estão desligados' : 'O alarme não vai tocar'}</span>}
           </div>
+          {list.length > 1 && <div className="muted small">{on} de {list.length} alarmes ligados</div>}
           <div className="muted small">Horário do Echo{data.tzOffsetMin != null ? ` (UTC${fmtOffset(data.tzOffsetMin)})` : ''}</div>
         </div>
       )}

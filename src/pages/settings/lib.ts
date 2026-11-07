@@ -4,7 +4,6 @@ import { run, shq } from '../../api';
 
 export const SETTINGS_FILE = '/data/penguin/settings.conf';
 export const DEFAULTS_FILE = '/etc/penguin/defaults.conf';
-export const ALARM_FILE = '/data/penguin/alarm.json';
 export const AUTH_KEYS = '/data/misc/techo5/ssh/authorized_keys';
 export const FIREWALL_LOG = '/data/techo5-linux/firewall.log';
 export const BACKLIGHT_SYS = '/sys/class/leds/lcd-backlight';
@@ -16,8 +15,9 @@ export const BACKLIGHT_SYS = '/sys/class/leds/lcd-backlight';
  *  boot     — only read by boot.sh: reboot the Echo
  *  session  — read by each new SSH / USB-console login
  *  ssh      — managed by `penguin ssh` (applies immediately)
+ *  screen   — re-read by the touch UI (penguin-ui) every few seconds
  */
-export type ApplyKind = 'restart' | 'firewall' | 'boot' | 'session' | 'ssh';
+export type ApplyKind = 'restart' | 'firewall' | 'boot' | 'session' | 'ssh' | 'screen';
 
 export const APPLY_LABEL: Record<ApplyKind, string> = {
   restart: 'após penguin restart',
@@ -25,6 +25,7 @@ export const APPLY_LABEL: Record<ApplyKind, string> = {
   boot: 'após reiniciar o Echo',
   session: 'em novas sessões SSH/USB',
   ssh: 'imediato (penguin ssh)',
+  screen: 'em segundos (tela)',
 };
 
 export type SettingKind = 'bool' | 'int' | 'select' | 'text' | 'ports';
@@ -82,7 +83,7 @@ export const SETTINGS_META: SettingMeta[] = [
   },
   {
     key: 'BACKLIGHT', label: 'Brilho da tela', group: 'Hardware', kind: 'int', min: 0, max: 255, apply: 'boot',
-    desc: 'Brilho de 0 a 255 aplicado no boot; 0 = tela desligada (e apagada). Para mudar na hora, use "Alarme & Tela".',
+    desc: 'Brilho de 0 a 255 aplicado no boot; 0 = tela desligada (e apagada). Com o brilho automático, é o brilho num ambiente claro (e a tela o aplica em segundos). Para mudar na hora, use "Alarme & Tela".',
   },
   {
     key: 'WATCHDOG', label: 'Watchdog', group: 'Hardware', kind: 'bool', apply: 'boot',
@@ -130,6 +131,22 @@ export const SETTINGS_META: SettingMeta[] = [
       { value: '7', label: '7 — info' }, { value: '8', label: '8 — todas' },
     ],
     desc: 'Após o boot, mensagens do kernel mais urgentes que este nível chegam ao console de logs.',
+  },
+  {
+    key: 'AUTO_BRIGHTNESS', label: 'Brilho automático', group: 'Tela', kind: 'bool', apply: 'screen',
+    desc: '1: a tela segue o sensor de luz do ambiente, de BACKLIGHT_DARK (quarto escuro) até BACKLIGHT (quarto aceso), com transição suave. 0: fica fixa em BACKLIGHT. Precisa da interface de toque (SCREEN_UI=1).',
+  },
+  {
+    key: 'BACKLIGHT_DARK', label: 'Brilho no escuro', group: 'Tela', kind: 'int', min: 1, max: 255, apply: 'screen',
+    desc: 'Com o brilho automático: o brilho (1–255) quando o ambiente está escuro. Não passa de BACKLIGHT.',
+  },
+  {
+    key: 'LIGHT_DARK', label: 'Sensor: escuro até', group: 'Tela', kind: 'int', min: 0, max: 4094, apply: 'screen',
+    desc: 'Leitura do sensor de luz (0–4095, mostrada em "Alarme & Tela" e na tela do Echo) até a qual o ambiente conta como escuro. Aumente se a tela continuar forte com a luz apagada.',
+  },
+  {
+    key: 'LIGHT_BRIGHT', label: 'Sensor: claro a partir de', group: 'Tela', kind: 'int', min: 1, max: 4095, apply: 'screen',
+    desc: 'Leitura do sensor a partir da qual o ambiente conta como claro (brilho BACKLIGHT). Entre LIGHT_DARK e este valor o brilho é intermediário, numa escala logarítmica.',
   },
   {
     key: 'VOLUME', label: 'Volume', group: 'Som', kind: 'int', min: 0, max: 100, unit: '%', apply: 'boot',
@@ -185,6 +202,8 @@ export function validateSetting(meta: SettingMeta, v: string, all?: Record<strin
       if (meta.max != null && n > meta.max) return `máximo ${meta.max}`;
       if (meta.key === 'TEMP_CRIT' && all && Number(all.TEMP_WARN) >= n) return 'precisa ser maior que TEMP_WARN';
       if (meta.key === 'TEMP_WARN' && all && Number(all.TEMP_CRIT) <= n) return 'precisa ser menor que TEMP_CRIT';
+      if (meta.key === 'LIGHT_DARK' && all && /^\d+$/.test(all.LIGHT_BRIGHT ?? '') && Number(all.LIGHT_BRIGHT) <= n) return 'precisa ser menor que LIGHT_BRIGHT';
+      if (meta.key === 'LIGHT_BRIGHT' && all && /^\d+$/.test(all.LIGHT_DARK ?? '') && Number(all.LIGHT_DARK) >= n) return 'precisa ser maior que LIGHT_DARK';
       return null;
     }
     case 'select':

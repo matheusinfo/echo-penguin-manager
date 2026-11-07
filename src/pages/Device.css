@@ -1,6 +1,12 @@
 /* Alarme & Tela (src/pages/Device.tsx). Prefixed dv- */
-.dv-alarm { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; }
-@media (max-width: 900px) { .dv-alarm { grid-template-columns: 1fr; } }
+.dv-alarms { display: flex; flex-direction: column; gap: 8px; }
+.dv-arow { display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-items: center; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-2); }
+.dv-arow.next { border-color: rgba(91, 156, 255, .45); }
+.dv-arow.off .dv-clock { opacity: .55; }
+.dv-arow-main { min-width: 0; }
+.dv-sound { max-width: 320px; }
+.dv-next-line { font-size: 15px; }
+@media (max-width: 760px) { .dv-arow { grid-template-columns: 1fr auto; } .dv-arow-main { grid-column: 1 / -1; grid-row: 2; } }
 .dv-clock { display: flex; align-items: center; gap: 6px; padding: 14px 18px; border-radius: 14px; background: var(--bg-2); border: 1px solid var(--border); }
 .dv-clock.off { opacity: .55; }
 .dv-unit { display: flex; flex-direction: column; align-items: center; gap: 4px; }
@@ -9,6 +15,10 @@
 .dv-digits { width: 2.3ch; font: 600 64px/1 var(--mono); text-align: center; background: transparent; border: 0; color: var(--text); outline: none; border-radius: 8px; padding: 2px 0; font-variant-numeric: tabular-nums; }
 .dv-digits:focus { background: rgba(91, 156, 255, .1); }
 .dv-colon { font: 600 56px/1 var(--mono); color: var(--muted); padding-bottom: 6px; }
+.dv-clock.compact { padding: 6px 10px; gap: 4px; border-radius: 10px; background: var(--panel-2); }
+.dv-unit.compact { gap: 2px; }
+.dv-unit.compact .dv-digits { font-size: 30px; }
+.dv-clock.compact .dv-colon { font-size: 26px; padding-bottom: 2px; }
 .dv-unit-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 
 .dv-seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-s); overflow: hidden; flex-wrap: wrap; }

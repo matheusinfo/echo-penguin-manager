@@ -158,6 +158,7 @@ export default function PenguinTab({ onGoTab }: { onGoTab: (t: string) => void }
                 </Button>
               )}
               {pending.kinds.includes('session') && <span className="small muted">SCREEN_MIRROR vale para as próximas sessões SSH/USB.</span>}
+              {pending.kinds.includes('screen') && <span className="small muted">As de brilho valem em segundos: a tela as relê sozinha.</span>}
               <Button size="s" variant="ghost" onClick={() => setPending(null)}>Dispensar</Button>
             </div>
           </div>

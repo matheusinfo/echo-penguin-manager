@@ -25,7 +25,8 @@ Echo:
   *All good / Needs attention / Critical* message.
 - 📦 **Your apps (Docker containers):** see what's running, start, stop or restart them, read their logs.
 - 📜 **Logs:** everything the Echo wrote down, live, with search.
-- ⏰ **Alarm, screen and sound:** set the alarm, change brightness and volume, play a test beep.
+- ⏰ **Alarms, screen and sound:** set up to eight alarms (time, repeat, on/off, beep or a song),
+  change brightness or let it follow the room's light, set the volume, play a test beep.
 - ⚙️ **Settings and maintenance:** every echo-penguin setting explained, who may connect over SSH,
   firewall ports, safe restarts and updates.
 - 💻 **Terminal:** for when you *do* want the command line, with handy saved commands.
@@ -60,7 +61,7 @@ Pick **one** of the three ways below. If you're not sure, use **Option A**.
 
 ### Option A: the installer package (`.deb`), easiest
 
-1. Get the file **`echo-data-viewer_0.1.0_amd64.deb`**. Someone may have given it to you, or you can
+1. Get the file **`echo-data-viewer_0.2.0_amd64.deb`**. Someone may have given it to you, or you can
    build it yourself (see [Option C](#option-c-build-it-yourself)). It ends up in the `release/` folder.
 2. **Double-click** the file. The Software Installer opens.
 3. Click **Install** and type your computer password when asked.
@@ -69,12 +70,12 @@ Pick **one** of the three ways below. If you're not sure, use **Option A**.
 Prefer the terminal? This does the same thing:
 
 ```bash
-sudo apt install ./release/echo-data-viewer_0.1.0_amd64.deb
+sudo apt install ./release/echo-data-viewer_0.2.0_amd64.deb
 ```
 
 ### Option B: the portable app (`.AppImage`), no install
 
-1. Get the file **`EchoManager-0.1.0-x86_64.AppImage`**.
+1. Get the file **`EchoManager-0.2.0-x86_64.AppImage`**.
 2. Right-click it → **Properties** → **Permissions** → tick **Allow executing file as program**.
 3. Double-click it. That's it.
 
@@ -140,19 +141,23 @@ You can change any of this later with the ✏️ pencil next to the connection s
 
 | Menu item | What you'll find |
 |---|---|
-| **Visão geral** (Overview) | The big picture: a health message with the reasons, temperature, CPU, memory, storage, Wi-Fi, services, your containers, the next alarm and recent problems. Small charts show the last few minutes. |
+| **Visão geral** (Overview) | The big picture: a health message with the reasons, temperature, CPU, memory, storage, Wi-Fi, services, your containers, the next alarm due and recent problems. Small charts show the last few minutes. |
 | **Sistema** (System) | All the details: version, the two system slots (A/B), each CPU core, temperatures, running programs, network and firewall, installed packages, kernel messages. |
 | **Docker** | Your containers: start, stop, restart, pause, remove, live logs, details, run a command inside. Also compose projects, images, volumes, networks and a cleanup corner. |
 | **Logs** | Every log in one place (supervisor, Docker, boot, firewall, kernel, crash records, each container). Turn on **Seguir** (follow) to watch it live; search with the box. |
-| **Alarme & Tela** (Alarm & Screen) | Set the alarm time and repeat, turn it on or off, change brightness, turn the screen off, set the volume, play a test beep. |
+| **Alarme & Tela** (Alarm & Screen) | Add, change and remove alarms (time, repeat, on/off, the beep or one of the songs in `/data/penguin/music`); automatic brightness on/off, the bright-room and dark-room levels and the light sensor's reading; brightness, screen off, volume, test beep. |
 | **Configurações** (Settings) | Every echo-penguin setting with an explanation, who may connect over SSH and their keys, firewall ports, and maintenance: restart, reboot, roll back to the previous system, clean up, export a diagnostic report. |
 | **Terminal SSH** | A real terminal on the Echo, in tabs, with a list of saved commands you can click. There's also a simple "run one command" box with history. |
 
 ### How do I…
 
-- **…change the alarm?** *Alarme & Tela* → set the time with the arrows → pick the repeat →
-  **Salvar**. The Echo's screen restarts for a second to pick it up (a running timer or stopwatch on
-  the screen is reset).
+- **…add or change an alarm?** *Alarme & Tela* → **Adicionar alarme** (or edit one in the list):
+  set the time with the arrows, pick the repeat and the sound → **Salvar**. The Echo's screen picks
+  the alarms up by itself within a second. (On echo-penguin v0.2.8 and older there is a single alarm,
+  and saving restarts the screen's interface for a second, resetting a running timer or stopwatch.)
+- **…make the screen dimmer when the room is dark?** *Alarme & Tela* → *Tela* → turn on **Brilho
+  automático** and set **Ambiente escuro** lower. If it stays bright with the lights off, click
+  **Está escuro agora** while the room is dark (needs echo-penguin v0.2.9 or newer).
 - **…restart one of my apps?** *Docker* → find it in the list → click the ↻ restart button.
 - **…see why something failed?** *Logs* → pick it on the left → type a word in the search box.
 - **…restart the Echo?** *Configurações* → *Manutenção* → **Reiniciar** (reboot). The app reconnects
