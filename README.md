@@ -65,7 +65,7 @@ Pick **one** of the three ways below. If you're not sure, use **Option A**.
 
 ### Option A: the installer package (`.deb`), easiest
 
-1. Get the file **`echo-data-viewer_0.3.0_amd64.deb`**. Someone may have given it to you, or you can
+1. Get the file **`echo-data-viewer_0.3.1_amd64.deb`**. Someone may have given it to you, or you can
    build it yourself (see [Option C](#option-c-build-it-yourself)). It ends up in the `release/` folder.
 2. **Double-click** the file. The Software Installer opens.
 3. Click **Install** and type your computer password when asked.
@@ -74,12 +74,12 @@ Pick **one** of the three ways below. If you're not sure, use **Option A**.
 Prefer the terminal? This does the same thing:
 
 ```bash
-sudo apt install ./release/echo-data-viewer_0.3.0_amd64.deb
+sudo apt install ./release/echo-data-viewer_0.3.1_amd64.deb
 ```
 
 ### Option B: the portable app (`.AppImage`), no install
 
-1. Get the file **`EchoManager-0.3.0-x86_64.AppImage`**.
+1. Get the file **`EchoManager-0.3.1-x86_64.AppImage`**.
 2. Right-click it → **Properties** → **Permissions** → tick **Allow executing file as program**.
 3. Double-click it. That's it.
 
@@ -149,7 +149,7 @@ You can change any of this later with the ✏️ pencil next to the connection s
 | **Sistema** (System) | All the details: version, the two system slots (A/B), each CPU core, temperatures, running programs, network and firewall, installed packages, kernel messages. |
 | **Docker** | Your containers: start, stop, restart, pause, remove, live logs, details, run a command inside. Also compose projects, images, volumes, networks and a cleanup corner. |
 | **Logs** | Every log in one place (supervisor, Docker, boot, firewall, kernel, crash records, each container). Turn on **Seguir** (follow) to watch it live; search with the box. |
-| **Alarme & Tela** (Alarm & Screen) | Add, change and remove alarms (time, repeat, on/off, the beep or one of the songs in `/data/penguin/music`); **Despertar** (waking up): sunrise before the alarm, volume that rises; **Tela noturna**: the dim night clock and its colour; automatic brightness on/off, the bright-room and dark-room levels and the light sensor's reading; brightness, screen off, volume, test beep; **Clima**: pick your city and see the forecast the Echo has; **Voz**: the voice, speaking after the alarm, a test; **Sono**: the sleep diary of the last 14 nights. |
+| **Alarme & Tela** (Alarm & Screen) | Add, change and remove alarms (time, repeat, on/off, the beep or one of the songs in `/data/penguin/music`); **Despertar** (waking up): sunrise before the alarm, volume that rises; **Tela noturna**: the dim night clock and its colour; automatic brightness on/off, the bright-room and dark-room levels and the light sensor's reading; brightness, screen off, volume, test beep; **Clima**: pick your city and see the forecast the Echo has; **Voz**: the voice, speaking after the alarm, the natural (Piper) voice for the alarm, a test; **Sono**: the sleep diary of the last 14 nights. |
 | **Configurações** (Settings) | Every echo-penguin setting with an explanation, who may connect over SSH and their keys, firewall ports, and maintenance: restart, reboot, roll back to the previous system, clean up, export a diagnostic report. |
 | **Terminal SSH** | A real terminal on the Echo, in tabs, with a list of saved commands you can click. There's also a simple "run one command" box with history. |
 
@@ -171,6 +171,12 @@ You can change any of this later with the ✏️ pencil next to the connection s
   its clock and says it after the alarm. **Remover** turns the weather off.
 - **…hear the time and the weather after the alarm, in Portuguese?** *Alarme & Tela* → *Voz* → pick
   **Português (Brasil)** and turn on **Falar depois do alarme**; **Testar voz** plays it now.
+- **…have the alarm greet me with a natural voice?** *Alarme & Tela* → *Voz* → **Voz do despertador** →
+  **Piper (natural)**, pick the **Voz natural** (the image has `pt_BR-faber-medium`; extra Piper voices go
+  in `/data/penguin/voices` as `.onnx` + `.onnx.json`) and **Testar voz natural** (it takes about 40 s
+  before it speaks). Piper is offline but slow on the Echo, so the greeting is prepared about 10 minutes
+  before the alarm; tapping the clock still uses the instant espeak voice. Needs echo-penguin v0.3.1 or
+  newer.
 - **…see how I slept?** *Alarme & Tela* → *Sono*: each night as a bar from lights off to waking up,
   with the times, the duration and the 7-night average. The diary works from the room's
   light: if nights don't show up, click **Está escuro agora** with the light off.

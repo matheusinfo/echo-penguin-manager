@@ -196,6 +196,15 @@ export const SETTINGS_META: SettingMeta[] = [
     desc: 'Voz do espeak-ng (en, pt-br, es, …; letras minúsculas, números, + e -). Vozes pt* falam português; as outras, inglês.',
   },
   {
+    key: 'SPEAK_ENGINE', label: 'Motor de voz', group: 'Voz', kind: 'select', apply: 'screen',
+    options: [{ value: 'espeak', label: 'espeak (robótica, instantânea)' }, { value: 'piper', label: 'Piper (natural)' }],
+    desc: 'espeak: a voz do espeak-ng (SPEAK_VOICE), na hora. piper: a fala do despertador vem do Piper, uma voz neural offline (PIPER_VOICE); como ela leva uns 40 s para ser gerada, o Echo a prepara uns 10 min antes do alarme. Tocar no relógio da tela inicial continua usando o espeak (instantâneo).',
+  },
+  {
+    key: 'PIPER_VOICE', label: 'Voz natural (Piper)', group: 'Voz', kind: 'text', apply: 'screen',
+    desc: 'Nome de uma voz do Piper, sem .onnx (ex.: pt_BR-faber-medium): os arquivos <nome>.onnx em /usr/share/piper/voices e /data/penguin/voices. Letras, números, _, . e -.',
+  },
+  {
     key: 'SPEAK_ALARM', label: 'Falar depois do alarme', group: 'Voz', kind: 'bool', apply: 'screen',
     desc: '1: ao parar um alarme, o Echo diz a hora e o clima. 0: silêncio. Tocar no relógio grande da tela inicial também fala.',
   },
@@ -276,6 +285,7 @@ export function validateSetting(meta: SettingMeta, v: string, all?: Record<strin
       }
       if (meta.key === 'WEATHER_PLACE' && v.length > 80) return 'no máximo 80 caracteres';
       if (meta.key === 'SPEAK_VOICE' && !/^[a-z0-9+-]{1,32}$/.test(v)) return 'nome de voz: minúsculas, números, + e - (ex.: pt-br)';
+      if (meta.key === 'PIPER_VOICE' && !/^[A-Za-z0-9_.-]{1,64}$/.test(v)) return 'nome de voz: letras, números, _, . e - (ex.: pt_BR-faber-medium)';
       return null;
   }
 }

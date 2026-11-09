@@ -2,8 +2,10 @@
 // weather, speech, sleep diary), detected from the files on the unit like alarms.ts detects the alarm
 // format, so the pages keep working with older images. This covers the programs those features need;
 // settings-only ones (gradual wake, night clock) are detected from their keys in defaults.conf.
+// v0.3.1 adds Piper, a natural (neural, offline) voice for the alarm's greeting.
 
 export const NEEDS_V030 = 'requer echo-penguin v0.3.0';
+export const NEEDS_V031 = 'requer echo-penguin v0.3.1';
 
 export interface Features {
   /** /usr/local/sbin/penguin-weather */
@@ -14,13 +16,15 @@ export interface Features {
   say: boolean;
   /** espeak-ng is installed (`say` needs it). */
   espeak: boolean;
+  /** Piper, the offline neural voice (/usr/local/bin/piper), v0.3.1+. Its settings need SPEAK_ENGINE in defaults.conf too. */
+  piper: boolean;
 }
 
 /** One shell section: prints one word per feature present. Cheap (one grep), so it runs every poll. */
 export const FEATURES_CMD =
   'for f in penguin-weather penguin-sleep; do [ -x /usr/local/sbin/$f ] && echo $f; done; ' +
   'grep -q espeak /usr/local/sbin/penguin-sound 2>/dev/null && echo say; ' +
-  'command -v espeak-ng >/dev/null 2>&1 && echo espeak; true';
+  'command -v espeak-ng >/dev/null 2>&1 && echo espeak; [ -x /usr/local/bin/piper ] && echo piper; true';
 
 export function parseFeatures(section: string | undefined): Features {
   const s = new Set((section ?? '').split('\n').map((x) => x.trim()));
@@ -29,7 +33,23 @@ export function parseFeatures(section: string | undefined): Features {
     sleep: s.has('penguin-sleep'),
     say: s.has('say'),
     espeak: s.has('espeak'),
+    piper: s.has('piper'),
   };
+}
+
+// --- Piper's voices: <name>.onnx (+ .onnx.json) in the image's folder and the user's.
+
+export const PIPER_VOICE_DIRS = ['/usr/share/piper/voices', '/data/penguin/voices'];
+/** Lists both folders (missing ones are fine); parsePiperVoices keeps the *.onnx names. Cheap, so it runs every poll. */
+export const PIPER_VOICES_CMD = `ls ${PIPER_VOICE_DIRS.join(' ')} 2>/dev/null; true`;
+
+/** A voice name PIPER_VOICE can hold (the file name without .onnx). */
+export const validPiperVoice = (v: string) => /^[A-Za-z0-9_.-]{1,64}$/.test(v);
+
+export function parsePiperVoices(text: string | undefined): string[] {
+  const names = (text ?? '').split('\n').map((x) => x.trim())
+    .filter((x) => x.endsWith('.onnx')).map((x) => x.slice(0, -'.onnx'.length)).filter(validPiperVoice);
+  return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
 }
 
 /** "v0.2.9" from /etc/techo5-release's first line, or null. */

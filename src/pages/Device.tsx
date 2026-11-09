@@ -11,7 +11,7 @@ import { Badge, Button, Card, Empty, ErrorBox, Grid, Loading, NeedsConnection, P
 import {
   BACKLIGHT_SYS, DEFAULTS_FILE, SETTINGS_FILE, META_BY_KEY, parseConf, parseEffective, setCommand, validateSetting,
 } from './settings/lib';
-import { FEATURES_CMD, NEEDS_V030, parseFeatures, releaseVersion } from './features';
+import { FEATURES_CMD, NEEDS_V030, PIPER_VOICES_CMD, parseFeatures, parsePiperVoices, releaseVersion } from './features';
 import { VOICES_CMD, WEATHER_READ_CMD, parseVoices, parseWeather } from './weather';
 import { ActFn, DevState, SetLive, calibrateDark } from './device/common';
 import { WakeCard, wakeSupported } from './device/WakeCard';
@@ -50,6 +50,7 @@ async function loadDevice(cache: { current: DevStatic | null }): Promise<DevStat
     now: "date '+%Y %m %d %H %M %S %s %Z'",
     feat: FEATURES_CMD,
     weather: WEATHER_READ_CMD,
+    piper: PIPER_VOICES_CMD,
     ...(cache.current ? {} : {
       blmax: `cat ${BACKLIGHT_SYS}/max_brightness`, defs: `cat ${DEFAULTS_FILE}`, voices: VOICES_CMD,
       rel: 'head -n 1 /etc/techo5-release 2>/dev/null; true',
@@ -104,6 +105,7 @@ function buildDevState(s: Record<string, string>, st: DevStatic, int: (v: string
     version: st.version,
     weather: parseWeather(s.weather),
     voices: st.voices,
+    piperVoices: parsePiperVoices(s.piper),
   };
 }
 

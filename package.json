@@ -1,7 +1,7 @@
 {
   "name": "echo-data-viewer",
   "productName": "Echo Manager",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Desktop manager for an Echo Show 5 running echo-penguin (Alpine Linux)",
   "author": {
     "name": "Matheus Andrade",

@@ -36,6 +36,8 @@ export interface DevState {
   weather: WeatherCache | null;
   /** espeak-ng's voices on the unit (empty: unknown). */
   voices: string[];
+  /** Piper's voices on the unit (names without .onnx; empty: none or no Piper). */
+  piperVoices: string[];
 }
 
 /** Writes one setting penguin-ui re-reads within seconds; validates first, toasts, refreshes. */

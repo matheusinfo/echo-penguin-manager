@@ -3,6 +3,7 @@
 import { echo, shq } from '../api';
 import { pad2 } from './alarms';
 import { setCommand, unsafeValue } from './settings/lib';
+import { validPiperVoice } from './features';
 
 export const WEATHER_CACHE = '/run/penguin/weather.json';
 export const WEATHER_READ_CMD = `cat ${WEATHER_CACHE} 2>/dev/null; true`;
@@ -239,7 +240,21 @@ export function sayTextError(t: string): string | null {
   return null;
 }
 
-/** Says the greeting penguin-ui says after an alarm, printing its text first. */
-export const SAY_GREETING_CMD = 't=$(penguin-weather speech) || exit 1; [ -n "$t" ] || t=$(date +%H:%M); printf "%s\\n" "$t"; penguin-sound say "$t" >/dev/null';
+// echo-penguin v0.3.1+ has two engines: espeak (instant) and Piper (natural, ~40 s to render here).
+// `-e` is passed only to units that have Piper: older penguin-sound does not know the option.
+export type SpeakEngine = 'espeak' | 'piper';
 
-export const sayCmd = (text: string) => `penguin-sound say ${shq(text.trim())}`;
+const engineOpt = (engine?: SpeakEngine, piperVoice?: string): string => {
+  if (!engine) return '';
+  if (engine === 'espeak') return '-e espeak ';
+  if (!piperVoice || !validPiperVoice(piperVoice)) throw new Error('voz do Piper inválida');
+  return `-e piper -v ${shq(piperVoice)} `;
+};
+
+/** Says the greeting penguin-ui says after an alarm, printing its text first. */
+export function sayGreetingCmd(engine?: SpeakEngine, piperVoice?: string): string {
+  return 't=$(penguin-weather speech) || exit 1; [ -n "$t" ] || t=$(date +%H:%M); printf "%s\\n" "$t"; ' +
+    `penguin-sound say ${engineOpt(engine, piperVoice)}"$t" >/dev/null`;
+}
+
+export const sayCmd = (text: string, engine?: SpeakEngine) => `penguin-sound say ${engineOpt(engine)}${shq(text.trim())}`;
