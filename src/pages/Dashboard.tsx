@@ -1,9 +1,10 @@
 // "Visão geral": at-a-glance health summary of the Echo.
 // One runSections() call per tick; cheap sections every tick, slow-changing ones (slot, alarm,
-// logs, crash records, release) every ~30 s or on manual refresh.
+// weather, logs, crash records, release) every ~30 s, the sleep diary every ~5 min, all of
+// them on manual refresh.
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity, AlarmClock, AlarmClockOff, ChevronRight, Clock, Container, Cpu, Gauge, HardDrive, Info, Layers,
+  Activity, AlarmClock, AlarmClockOff, BedDouble, ChevronRight, Clock, CloudSun, Container, Cpu, Gauge, HardDrive, Info, Layers,
   MemoryStick, ScrollText, Server, ShieldAlert, ShieldCheck, ShieldX, Thermometer, Wifi,
 } from 'lucide-react';
 import { echo, fmtBytes, fmtDuration, runSections, shq } from '../api';
@@ -13,6 +14,8 @@ import {
   Sparkline, Stat, toneFor,
 } from '../components/ui';
 import { Alarm, AlarmsOnDevice, ALARMS_READ_CMD, nextAlarm, parseAlarmsSection } from './alarms';
+import { Night, deviceTime, fmtSleep, hhmm, parseNights, sleepNightsCmd } from './sleep';
+import { WEATHER_CREDIT, WEATHER_READ_CMD, WEATHER_STALE_S, WeatherCache, parseWeather, weatherLine } from './weather';
 import './Dashboard.css';
 
 type Tone = 'ok' | 'warn' | 'bad' | 'info' | 'muted';
@@ -34,6 +37,8 @@ interface Slow {
   booted: string | null;
   slots: SlotInfo[];
   alarms: AlarmsOnDevice | null;
+  /** echo-penguin v0.3.0+: the weather penguin-weather last fetched. */
+  weather: WeatherCache | null;
   logLines: string[];
   crashCount: number | null;
   crashLatest: number | null; // epoch seconds
@@ -58,6 +63,8 @@ interface Snapshot {
   disks: Disk[];
   wifi: Wifi;
   slow: Slow | null;
+  /** The newest night of the sleep diary (echo-penguin v0.3.0+); null when none, undefined before the first read. */
+  lastNight: Night | null | undefined;
 }
 
 interface HistPoint { t: number; cpu: number | null; temp: number | null; mem: number | null }
@@ -114,11 +121,18 @@ const SLOW: Record<string, string> = {
   slot: 'slotctl status 2>/dev/null',
   // The alarm file has no trailing newline: the command echoes one so the next section marker starts its own line.
   alarms: ALARMS_READ_CMD,
+  weather: WEATHER_READ_CMD,
   sup: `tail -n 500 /data/penguin/logs/supervisor.log 2>/dev/null | grep -iE ${shq(LOG_FILTER)} | tail -n 8`,
   crash:
     'd=/data/techo5-linux/crash; ls "$d" 2>/dev/null | wc -l; ' +
     'f=$(ls -t "$d" 2>/dev/null | head -n 1); [ -n "$f" ] && stat -c %Y "$d/$f" 2>/dev/null; true',
 };
+
+/** penguin-sleep is a Python program: its section runs every few minutes only. Nothing on older images. */
+const SLEEP: Record<string, string> = {
+  sleep: `[ -x /usr/local/sbin/penguin-sleep ] && ${sleepNightsCmd(2)} 2>/dev/null; true`,
+};
+const SLEEP_EVERY_MS = 5 * 60000;
 
 // ---------------------------------------------------------------- parsers
 
@@ -243,6 +257,7 @@ function parseSlow(s: Record<string, string>): Slow {
     booted,
     slots,
     alarms,
+    weather: parseWeather(s.weather),
     logLines: (s.sup ?? '').split('\n').filter((l) => l.trim()),
     crashCount: num(crashLines[0]),
     crashLatest: num(crashLines[1]),
@@ -348,13 +363,16 @@ export default function DashboardPage() {
   const tick = useRef(0);
   const forceSlow = useRef(false);
   const slowRef = useRef<Slow | null>(null);
+  const sleepRef = useRef<{ at: number; night: Night | null } | null>(null);
   const prevCpu = useRef<{ busy: number; up: number } | null>(null);
 
   const loader = useCallback(async (): Promise<Snapshot> => {
-    const wantSlow = forceSlow.current || !slowRef.current || tick.current % slowEvery === 0;
+    const forced = forceSlow.current;
+    const wantSlow = forced || !slowRef.current || tick.current % slowEvery === 0;
+    const wantSleep = wantSlow && (forced || !sleepRef.current || Date.now() - sleepRef.current.at > SLEEP_EVERY_MS);
     forceSlow.current = false;
     tick.current++;
-    const s = await runSections(wantSlow ? { ...FAST, ...SLOW } : FAST, { timeout: 25000 });
+    const s = await runSections({ ...FAST, ...(wantSlow ? SLOW : {}), ...(wantSleep ? SLEEP : {}) }, { timeout: 25000 });
 
     const nowLines = (s.now ?? '').split('\n');
     const [epochS, tz] = (nowLines[0] ?? '').trim().split(/\s+/);
@@ -397,6 +415,13 @@ export default function DashboardPage() {
 
     const dk = parseContainers(s.docker);
     if (wantSlow) slowRef.current = parseSlow(s);
+    if (wantSleep) {
+      let night: Night | null = null;
+      try {
+        if ((s.sleep ?? '').trim()) night = parseNights(s.sleep).nights[0] ?? null;
+      } catch { /* not the expected JSON: show nothing */ }
+      sleepRef.current = { at: Date.now(), night };
+    }
 
     return {
       at: Date.now(),
@@ -417,6 +442,7 @@ export default function DashboardPage() {
       disks: parseDisks(s.disk),
       wifi: parseWifi(s.net),
       slow: slowRef.current,
+      lastNight: sleepRef.current?.night,
     };
   }, [slowEvery]);
 
@@ -783,7 +809,40 @@ function AlarmCard({ data, navigate }: { data: Snapshot; navigate: ReturnType<ty
           <div className="muted small">Horário do Echo{data.tzOffsetMin != null ? ` (UTC${fmtOffset(data.tzOffsetMin)})` : ''}</div>
         </div>
       )}
+      {slow && <MorningLines data={data} />}
     </Card>
+  );
+}
+
+/** echo-penguin v0.3.0+: the weather and last night, one line each (only what exists). */
+function MorningLines({ data }: { data: Snapshot }) {
+  const slow = data.slow;
+  const nowS = data.devEpoch ?? Date.now() / 1000;
+  const w = slow?.weather ?? null;
+  const fresh = w && w.now && w.fetched != null && nowS - w.fetched <= WEATHER_STALE_S ? weatherLine(w, nowS) : '';
+  const night = data.lastNight ?? null;
+  if (!w && !night) return null;
+  const at = (epoch: number) => hhmm(deviceTime(epoch, data.tzOffsetMin));
+  return (
+    <div className="dash-morning">
+      {w && (
+        <div className="row gap-s" title={w.error ? `Última atualização falhou: ${w.error}` : undefined}>
+          <CloudSun size={14} className="muted" />
+          {fresh
+            ? <span className="ellipsis">{fresh}{w.place && <span className="muted"> · {w.place.split(',')[0]}</span>}<span className="muted"> · {WEATHER_CREDIT}</span></span>
+            : <span className="muted">{w.fetched == null ? 'Clima: sem dados' : 'Clima desatualizado'}{w.error ? ' (a atualização falhou)' : ''}</span>}
+        </div>
+      )}
+      {night && (
+        <div className="row gap-s">
+          <BedDouble size={14} className="muted" />
+          <span>
+            Última noite: <strong>{fmtSleep(night.minutes)}</strong>{' '}
+            <span className="muted">({at(night.bed)} → {at(night.wake)})</span>
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 

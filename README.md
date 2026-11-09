@@ -27,12 +27,16 @@ Echo:
 - 📜 **Logs:** everything the Echo wrote down, live, with search.
 - ⏰ **Alarms, screen and sound:** set up to eight alarms (time, repeat, on/off, beep or a song),
   change brightness or let it follow the room's light, set the volume, play a test beep.
+- 🌅 **Waking up and sleeping:** a "sunrise" on the screen before the alarm, an alarm that starts
+  quietly, a dim night clock, the weather for your city, a voice that says the time and the
+  weather after the alarm, and a sleep diary of the last two weeks.
 - ⚙️ **Settings and maintenance:** every echo-penguin setting explained, who may connect over SSH,
   firewall ports, safe restarts and updates.
 - 💻 **Terminal:** for when you *do* want the command line, with handy saved commands.
 
 Echo Manager talks **only to your Echo**, over SSH, on your home network. It doesn't install anything on
-the Echo and doesn't send anything to the internet.
+the Echo and doesn't send anything to the internet. (The weather comes from the Echo itself: when you
+search for your city, it's the Echo that asks [Open-Meteo](https://open-meteo.com), as its screen does.)
 
 > The app's screens are in Brazilian Portuguese. This guide is in English.
 
@@ -61,7 +65,7 @@ Pick **one** of the three ways below. If you're not sure, use **Option A**.
 
 ### Option A: the installer package (`.deb`), easiest
 
-1. Get the file **`echo-data-viewer_0.2.0_amd64.deb`**. Someone may have given it to you, or you can
+1. Get the file **`echo-data-viewer_0.3.0_amd64.deb`**. Someone may have given it to you, or you can
    build it yourself (see [Option C](#option-c-build-it-yourself)). It ends up in the `release/` folder.
 2. **Double-click** the file. The Software Installer opens.
 3. Click **Install** and type your computer password when asked.
@@ -70,12 +74,12 @@ Pick **one** of the three ways below. If you're not sure, use **Option A**.
 Prefer the terminal? This does the same thing:
 
 ```bash
-sudo apt install ./release/echo-data-viewer_0.2.0_amd64.deb
+sudo apt install ./release/echo-data-viewer_0.3.0_amd64.deb
 ```
 
 ### Option B: the portable app (`.AppImage`), no install
 
-1. Get the file **`EchoManager-0.2.0-x86_64.AppImage`**.
+1. Get the file **`EchoManager-0.3.0-x86_64.AppImage`**.
 2. Right-click it → **Properties** → **Permissions** → tick **Allow executing file as program**.
 3. Double-click it. That's it.
 
@@ -141,11 +145,11 @@ You can change any of this later with the ✏️ pencil next to the connection s
 
 | Menu item | What you'll find |
 |---|---|
-| **Visão geral** (Overview) | The big picture: a health message with the reasons, temperature, CPU, memory, storage, Wi-Fi, services, your containers, the next alarm due and recent problems. Small charts show the last few minutes. |
+| **Visão geral** (Overview) | The big picture: a health message with the reasons, temperature, CPU, memory, storage, Wi-Fi, services, your containers, the next alarm due (and the weather and last night's sleep) and recent problems. Small charts show the last few minutes. |
 | **Sistema** (System) | All the details: version, the two system slots (A/B), each CPU core, temperatures, running programs, network and firewall, installed packages, kernel messages. |
 | **Docker** | Your containers: start, stop, restart, pause, remove, live logs, details, run a command inside. Also compose projects, images, volumes, networks and a cleanup corner. |
 | **Logs** | Every log in one place (supervisor, Docker, boot, firewall, kernel, crash records, each container). Turn on **Seguir** (follow) to watch it live; search with the box. |
-| **Alarme & Tela** (Alarm & Screen) | Add, change and remove alarms (time, repeat, on/off, the beep or one of the songs in `/data/penguin/music`); automatic brightness on/off, the bright-room and dark-room levels and the light sensor's reading; brightness, screen off, volume, test beep. |
+| **Alarme & Tela** (Alarm & Screen) | Add, change and remove alarms (time, repeat, on/off, the beep or one of the songs in `/data/penguin/music`); **Despertar** (waking up): sunrise before the alarm, volume that rises; **Tela noturna**: the dim night clock and its colour; automatic brightness on/off, the bright-room and dark-room levels and the light sensor's reading; brightness, screen off, volume, test beep; **Clima**: pick your city and see the forecast the Echo has; **Voz**: the voice, speaking after the alarm, a test; **Sono**: the sleep diary of the last 14 nights. |
 | **Configurações** (Settings) | Every echo-penguin setting with an explanation, who may connect over SSH and their keys, firewall ports, and maintenance: restart, reboot, roll back to the previous system, clean up, export a diagnostic report. |
 | **Terminal SSH** | A real terminal on the Echo, in tabs, with a list of saved commands you can click. There's also a simple "run one command" box with history. |
 
@@ -158,6 +162,18 @@ You can change any of this later with the ✏️ pencil next to the connection s
 - **…make the screen dimmer when the room is dark?** *Alarme & Tela* → *Tela* → turn on **Brilho
   automático** and set **Ambiente escuro** lower. If it stays bright with the lights off, click
   **Está escuro agora** while the room is dark (needs echo-penguin v0.2.9 or newer).
+- **…wake up more gently?** *Alarme & Tela* → *Despertar*: the **sunrise** (the screen brightens
+  before the alarm) and the **volume gradual**: the alarm starts at a percentage of its volume (80 % by
+  default, so 40 when the volume is 50) and rises to it; 100 % means no ramp. Needs echo-penguin v0.3.0
+  or newer.
+- **…get the weather on the Echo?** *Alarme & Tela* → *Clima* → type your city → **Buscar** → **Usar**
+  next to the right one. The Echo fetches the forecast right away and every 30 minutes, shows it under
+  its clock and says it after the alarm. **Remover** turns the weather off.
+- **…hear the time and the weather after the alarm, in Portuguese?** *Alarme & Tela* → *Voz* → pick
+  **Português (Brasil)** and turn on **Falar depois do alarme**; **Testar voz** plays it now.
+- **…see how I slept?** *Alarme & Tela* → *Sono*: each night as a bar from lights off to waking up,
+  with the times, the duration and the 7-night average. The diary works from the room's
+  light: if nights don't show up, click **Está escuro agora** with the light off.
 - **…restart one of my apps?** *Docker* → find it in the list → click the ↻ restart button.
 - **…see why something failed?** *Logs* → pick it on the left → type a word in the search box.
 - **…restart the Echo?** *Configurações* → *Manutenção* → **Reiniciar** (reboot). The app reconnects

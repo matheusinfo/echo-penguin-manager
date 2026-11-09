@@ -16,8 +16,9 @@ export const BACKLIGHT_SYS = '/sys/class/leds/lcd-backlight';
  *  session  — read by each new SSH / USB-console login
  *  ssh      — managed by `penguin ssh` (applies immediately)
  *  screen   — re-read by the touch UI (penguin-ui) every few seconds
+ *  weather  — used by the next weather update (`penguin-weather update`, every 30 min)
  */
-export type ApplyKind = 'restart' | 'firewall' | 'boot' | 'session' | 'ssh' | 'screen';
+export type ApplyKind = 'restart' | 'firewall' | 'boot' | 'session' | 'ssh' | 'screen' | 'weather';
 
 export const APPLY_LABEL: Record<ApplyKind, string> = {
   restart: 'após penguin restart',
@@ -26,6 +27,7 @@ export const APPLY_LABEL: Record<ApplyKind, string> = {
   session: 'em novas sessões SSH/USB',
   ssh: 'imediato (penguin ssh)',
   screen: 'em segundos (tela)',
+  weather: 'na próxima atualização do clima',
 };
 
 export type SettingKind = 'bool' | 'int' | 'select' | 'text' | 'ports';
@@ -149,8 +151,57 @@ export const SETTINGS_META: SettingMeta[] = [
     desc: 'Leitura do sensor a partir da qual o ambiente conta como claro (brilho BACKLIGHT). Entre LIGHT_DARK e este valor o brilho é intermediário, numa escala logarítmica.',
   },
   {
+    key: 'NIGHT_CLOCK', label: 'Relógio noturno', group: 'Tela', kind: 'select', apply: 'screen',
+    options: [
+      { value: 'auto', label: 'auto (quando o quarto escurece)' }, { value: 'on', label: 'on (sempre, após 30 s sem toque)' },
+      { value: 'off', label: 'off (nunca)' },
+    ],
+    desc: 'auto: com o quarto escuro (sensor ≤ LIGHT_DARK) e 30 s sem toque na tela, só um relógio fraco e o próximo alarme aparecem; um toque traz a interface de volta. on: sempre que a tela fica 30 s sem toque, mesmo com o quarto claro. off: nunca.',
+  },
+  {
+    key: 'NIGHT_COLOR', label: 'Cor do relógio noturno', group: 'Tela', kind: 'select', apply: 'screen',
+    options: [{ value: 'red', label: 'vermelho' }, { value: 'amber', label: 'âmbar' }],
+    desc: 'A cor dos dígitos do relógio noturno. Vermelho atrapalha menos a visão no escuro.',
+  },
+  {
     key: 'VOLUME', label: 'Volume', group: 'Som', kind: 'int', min: 0, max: 100, unit: '%', apply: 'boot',
     desc: 'Volume do amplificador no boot (0–100). A interface e os botões de volume também o alteram. Para mudar na hora, use "Alarme & Tela".',
+  },
+  {
+    key: 'WAKE_LIGHT', label: 'Nascer do sol', group: 'Despertar', kind: 'int', min: 0, max: 60, unit: 'min', apply: 'screen',
+    desc: 'Minutos antes de um alarme em que a tela começa a clarear aos poucos, em cores quentes, de BACKLIGHT_DARK até BACKLIGHT (mesmo com a tela desligada, se ninguém a tocou há 30 s). 0 = desligado.',
+  },
+  {
+    key: 'WAKE_RAMP', label: 'Volume gradual', group: 'Despertar', kind: 'int', min: 0, max: 600, unit: 's', apply: 'screen',
+    desc: 'Segundos que o volume do alarme leva para subir do volume inicial (WAKE_VOLUME_START % de VOLUME) até VOLUME. 0 = desligado (toca direto no volume).',
+  },
+  {
+    key: 'WAKE_VOLUME_START', label: 'Volume inicial', group: 'Despertar', kind: 'int', min: 0, max: 100, unit: '% de VOLUME', apply: 'screen',
+    desc: 'Onde o volume gradual começa, em % do volume do alarme (VOLUME): com VOLUME=50, o padrão 80 começa em 40 e sobe até 50. 100 = sem subida. Depois do alarme, o volume volta a VOLUME.',
+  },
+  {
+    key: 'WEATHER_LAT', label: 'Clima: latitude', group: 'Clima', kind: 'text', apply: 'weather',
+    desc: 'Latitude do local do clima, em graus decimais (−90 a 90, ponto decimal, ex.: -23.5475). Vazio = sem clima. Mais fácil: busque a cidade em "Alarme & Tela" → Clima.',
+  },
+  {
+    key: 'WEATHER_LON', label: 'Clima: longitude', group: 'Clima', kind: 'text', apply: 'weather',
+    desc: 'Longitude do local do clima, em graus decimais (−180 a 180, ex.: -46.6361). Vazio = sem clima.',
+  },
+  {
+    key: 'WEATHER_PLACE', label: 'Clima: nome do local', group: 'Clima', kind: 'text', apply: 'weather',
+    desc: 'O nome do local, só para exibir (ex.: São Paulo, Brasil). Os dados vêm do Open-Meteo, sem chave; a tela os atualiza a cada 30 min.',
+  },
+  {
+    key: 'SPEAK_VOICE', label: 'Voz', group: 'Voz', kind: 'text', apply: 'screen',
+    desc: 'Voz do espeak-ng (en, pt-br, es, …; letras minúsculas, números, + e -). Vozes pt* falam português; as outras, inglês.',
+  },
+  {
+    key: 'SPEAK_ALARM', label: 'Falar depois do alarme', group: 'Voz', kind: 'bool', apply: 'screen',
+    desc: '1: ao parar um alarme, o Echo diz a hora e o clima. 0: silêncio. Tocar no relógio grande da tela inicial também fala.',
+  },
+  {
+    key: 'SLEEP_LOG', label: 'Diário de sono', group: 'Sono', kind: 'bool', apply: 'screen',
+    desc: '1: anota quando a luz do quarto apaga e acende (pelo sensor de luz, LIGHT_DARK) e os alarmes, para o diário de sono (penguin-sleep). 0: não anota.',
   },
 ];
 
@@ -216,8 +267,22 @@ export function validateSetting(meta: SettingMeta, v: string, all?: Record<strin
     }
     case 'text':
       if (meta.key === 'CPU_ONLINE' && v.trim() && !/^[0-3](\s+[0-3])*$/.test(v.trim())) return 'números de 0 a 3 separados por espaço';
+      if (meta.key === 'WEATHER_LAT' || meta.key === 'WEATHER_LON') {
+        const lim = meta.key === 'WEATHER_LAT' ? 90 : 180;
+        if (v !== '' && !isCoord(v, lim)) return /,/.test(v) ? 'use ponto decimal (ex.: -23.55)' : `graus decimais de −${lim} a ${lim}`;
+        const other = meta.key === 'WEATHER_LAT' ? 'WEATHER_LON' : 'WEATHER_LAT';
+        if (all && other in all && (v === '') !== ((all[other] ?? '') === '')) return v === '' ? `apague também ${other}` : `preencha também ${other}`;
+        return null;
+      }
+      if (meta.key === 'WEATHER_PLACE' && v.length > 80) return 'no máximo 80 caracteres';
+      if (meta.key === 'SPEAK_VOICE' && !/^[a-z0-9+-]{1,32}$/.test(v)) return 'nome de voz: minúsculas, números, + e - (ex.: pt-br)';
       return null;
   }
+}
+
+/** Decimal degrees within ±limit, written plainly ("-23.5475"). */
+export function isCoord(v: string, limit: number): boolean {
+  return /^-?\d{1,3}(\.\d{1,8})?$/.test(v) && Math.abs(Number(v)) <= limit;
 }
 
 export function isPort(p: string): boolean {

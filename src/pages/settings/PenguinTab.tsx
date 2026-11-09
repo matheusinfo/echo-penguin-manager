@@ -1,6 +1,6 @@
 // Tab 1: every setting from /etc/penguin/defaults.conf as a form row, diff-based save, raw editor.
 import { useEffect, useMemo, useState } from 'react';
-import { FileText, RotateCcw, Save, Undo2, Info, TriangleAlert, Power, RefreshCw, Flame } from 'lucide-react';
+import { CloudSun, FileText, RotateCcw, Save, Undo2, Info, TriangleAlert, Power, RefreshCw, Flame } from 'lucide-react';
 import { echo, errMsg, run, runSections } from '../../api';
 import { useApp, usePoll } from '../../hooks';
 import { Badge, Button, Card, ErrorBox, Loading, Modal, RefreshButton, Switch } from '../../components/ui';
@@ -9,6 +9,7 @@ import {
   addrKind, normValue, parseConf, parseEffective, removeCommand, setCommand, unsafeValue, validateSetting,
 } from './lib';
 import { usePenguinActions } from './actions';
+import { updateWeather } from '../weather';
 
 interface Loaded {
   effective: Record<string, string>;
@@ -39,6 +40,12 @@ export default function PenguinTab({ onGoTab }: { onGoTab: (t: string) => void }
   const [pending, setPending] = useState<{ kinds: ApplyKind[]; keys: string[] } | null>(null);
   const [rawOpen, setRawOpen] = useState(false);
   const { busy, act, restartSupervisor, applyFirewall, rebootEcho } = usePenguinActions(refresh);
+
+  const refreshWeather = () => act('weather', async () => {
+    const r = await updateWeather();
+    if (!r.ok && !r.noLocation) throw new Error(r.message);
+    toast(r.noLocation ? 'Sem local configurado: o clima fica desligado' : 'Clima atualizado', r.noLocation ? 'info' : 'ok');
+  });
 
   const metas: SettingMeta[] = useMemo(() => {
     if (!data) return [];
@@ -158,7 +165,10 @@ export default function PenguinTab({ onGoTab }: { onGoTab: (t: string) => void }
                 </Button>
               )}
               {pending.kinds.includes('session') && <span className="small muted">SCREEN_MIRROR vale para as próximas sessões SSH/USB.</span>}
-              {pending.kinds.includes('screen') && <span className="small muted">As de brilho valem em segundos: a tela as relê sozinha.</span>}
+              {pending.kinds.includes('weather') && (
+                <Button size="s" variant="primary" icon={<CloudSun size={14} />} busy={busy === 'weather'} onClick={refreshWeather}>penguin-weather update</Button>
+              )}
+              {pending.kinds.includes('screen') && <span className="small muted">As da tela valem em segundos: a interface as relê sozinha.</span>}
               <Button size="s" variant="ghost" onClick={() => setPending(null)}>Dispensar</Button>
             </div>
           </div>

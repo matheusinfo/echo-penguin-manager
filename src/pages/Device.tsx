@@ -1,4 +1,5 @@
-// "Alarme & Tela": the touch UI's alarms (/data/penguin/alarms.json), the screen and the speaker.
+// "Alarme & Tela": the touch UI's alarms (/data/penguin/alarms.json), waking up (sunrise, volume
+// ramp), the screen and the night clock, the speaker, the weather, the voice and the sleep diary.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlarmClock, Bell, BellOff, ChevronDown, ChevronUp, Info, Monitor, Moon, Play, Plus, RefreshCw, Save, Sun, SunDim, Trash2,
@@ -10,9 +11,17 @@ import { Badge, Button, Card, Empty, ErrorBox, Grid, Loading, NeedsConnection, P
 import {
   BACKLIGHT_SYS, DEFAULTS_FILE, SETTINGS_FILE, META_BY_KEY, parseConf, parseEffective, setCommand, validateSetting,
 } from './settings/lib';
+import { FEATURES_CMD, NEEDS_V030, parseFeatures, releaseVersion } from './features';
+import { VOICES_CMD, WEATHER_READ_CMD, parseVoices, parseWeather } from './weather';
+import { ActFn, DevState, SetLive, calibrateDark } from './device/common';
+import { WakeCard, wakeSupported } from './device/WakeCard';
+import { NightCard } from './device/NightCard';
+import { WeatherCard, weatherSupported } from './device/WeatherCard';
+import { VoiceCard, voiceSupported } from './device/VoiceCard';
+import { SleepCard, sleepSupported } from './device/SleepCard';
 import { usePenguinActions } from './settings/actions';
 import {
-  ALARMS_FILE, ALARMS_READ_CMD, Alarm, AlarmsOnDevice, MAX_ALARMS, MUSIC_DIR, OLD_ALARM_FILE, REPEATS, alarmsJson, alarmsKey,
+  ALARMS_FILE, ALARMS_READ_CMD, Alarm, MAX_ALARMS, MUSIC_DIR, OLD_ALARM_FILE, REPEATS, alarmsJson, alarmsKey,
   fmtUntil, isTrack, minutesUntil, newAlarm, nextAlarm, pad2 as pad, parseAlarms, parseAlarmsSection, soundLabel, sortAlarms,
   validAlarm,
 } from './alarms';
@@ -22,30 +31,10 @@ const WD_SHORT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 /** The ambient light sensor's reading (echo-penguin's penguin-ui reads the same file). */
 const ALS_FILE = '/sys/bus/platform/drivers/als_ps/als';
 
-// --- Device state.
+// --- Device state (DevState: ./device/common).
 
-interface DevState {
-  alarms: AlarmsOnDevice;
-  /** Tracks in /data/penguin/music an alarm can play. */
-  music: string[];
-  bl: number | null;
-  blMax: number;
-  /** The light sensor's reading (0–4095), null without a sensor. */
-  light: number | null;
-  vol: number | null;
-  volErr: string | null;
-  effective: Record<string, string>;
-  defaults: Record<string, string>;
-  overrides: Record<string, string>;
-  uiPid: string;
-  printk: number | null;
-  /** device wall clock minus our clock, ms (device local time encoded as UTC). */
-  clockOffset: number | null;
-  tz: string;
-}
-
-/** What does not change while the page is open (the image's defaults, the panel's range): read once. */
-interface DevStatic { defaults: Record<string, string>; blMax: number }
+/** What does not change while the page is open (the image's defaults, the panel's range...): read once. */
+interface DevStatic { defaults: Record<string, string>; blMax: number; voices: string[]; version: string | null }
 
 async function loadDevice(cache: { current: DevStatic | null }): Promise<DevState> {
   const s = await runSections({
@@ -58,13 +47,18 @@ async function loadDevice(cache: { current: DevStatic | null }): Promise<DevStat
     conf: `cat ${SETTINGS_FILE} 2>/dev/null; true`,
     ui: 'pidof penguin-ui; true',
     printk: 'cat /proc/sys/kernel/printk',
-    now: "date '+%Y %m %d %H %M %S %Z'",
-    ...(cache.current ? {} : { blmax: `cat ${BACKLIGHT_SYS}/max_brightness`, defs: `cat ${DEFAULTS_FILE}` }),
+    now: "date '+%Y %m %d %H %M %S %s %Z'",
+    feat: FEATURES_CMD,
+    weather: WEATHER_READ_CMD,
+    ...(cache.current ? {} : {
+      blmax: `cat ${BACKLIGHT_SYS}/max_brightness`, defs: `cat ${DEFAULTS_FILE}`, voices: VOICES_CMD,
+      rel: 'head -n 1 /etc/techo5-release 2>/dev/null; true',
+    }),
   });
   const int = (v: string | undefined) => (v != null && /^\s*\d+\s*$/.test(v) ? Number(v) : null);
   if (!cache.current) {
     const defaults = parseConf(s.defs ?? '');
-    const st = { defaults, blMax: int(s.blmax) ?? 255 };
+    const st = { defaults, blMax: int(s.blmax) ?? 255, voices: parseVoices(s.voices), version: releaseVersion(s.rel) };
     if (Object.keys(defaults).length) cache.current = st; // else: read again next time
     return buildDevState(s, st, int);
   }
@@ -74,9 +68,17 @@ async function loadDevice(cache: { current: DevStatic | null }): Promise<DevStat
 function buildDevState(s: Record<string, string>, st: DevStatic, int: (v: string | undefined) => number | null): DevState {
   const n = (s.now ?? '').trim().split(/\s+/);
   let clockOffset: number | null = null;
+  let epochOffset: number | null = null;
+  let tzOffsetMin: number | null = null;
   if (n.length >= 6 && n.slice(0, 6).every((x) => /^\d+$/.test(x))) {
     const [Y, M, D, h, mi, se] = n.map(Number);
-    clockOffset = Date.UTC(Y, M - 1, D, h, mi, se) - Date.now();
+    const wall = Date.UTC(Y, M - 1, D, h, mi, se);
+    clockOffset = wall - Date.now();
+    if (/^\d+$/.test(n[6] ?? '')) {
+      const epochMs = Number(n[6]) * 1000;
+      epochOffset = epochMs - Date.now();
+      tzOffsetMin = Math.round((wall - epochMs) / 60000);
+    }
   }
   const lightRaw = (s.light ?? '').trim();
   const light = /^0x[0-9a-f]+$/i.test(lightRaw) ? parseInt(lightRaw, 16) : int(lightRaw);
@@ -95,7 +97,13 @@ function buildDevState(s: Record<string, string>, st: DevStatic, int: (v: string
     uiPid: (s.ui ?? '').trim(),
     printk: int((s.printk ?? '').trim().split(/\s+/)[0]),
     clockOffset,
-    tz: n[6] ?? '',
+    epochOffset,
+    tzOffsetMin,
+    tz: (/^\d+$/.test(n[6] ?? '') ? n[7] : n[6]) ?? '', // %s comes before %Z
+    features: parseFeatures(s.feat),
+    version: st.version,
+    weather: parseWeather(s.weather),
+    voices: st.voices,
   };
 }
 
@@ -106,7 +114,7 @@ echo 'a interface (penguin-ui) não voltou em 15 s' >&2; exit 1`;
 export default function DevicePage() {
   const { connected } = useApp();
   return (
-    <Page title="Alarme & Tela" subtitle="Os alarmes, o brilho e o som do Echo (os mesmos da interface de toque)">
+    <Page title="Alarme & Tela" subtitle="Os alarmes, o despertar, a tela, o som, o clima, a voz e o sono do Echo (os mesmos da interface de toque)">
       <NeedsConnection connected={connected}><DeviceBody /></NeedsConnection>
     </Page>
   );
@@ -119,6 +127,20 @@ function DeviceBody() {
   const { busy, act, rebootEcho } = usePenguinActions(refresh);
 
   if (!data) return error ? <ErrorBox error={error} onRetry={refresh} /> : <Loading />;
+
+  /** A setting penguin-ui (or penguin-sound, penguin-weather) picks up by itself within seconds. */
+  const setLive: SetLive = async (key, value, okMsg, also = {}) => {
+    const v = String(value);
+    const meta = META_BY_KEY[key];
+    const bad = meta ? validateSetting(meta, v, { ...data.effective, ...also, [key]: v }) : 'configuração desconhecida';
+    if (bad) { toast(`${key}: ${bad}`, 'error'); return false; }
+    const ok = await act(key, () => run(setCommand(key, v, data.defaults[key])), okMsg);
+    refresh();
+    return ok;
+  };
+  // An older echo-penguin has none of v0.3.0's features: one note instead of five cards saying so.
+  const v030 = wakeSupported(data) || 'NIGHT_CLOCK' in data.defaults || weatherSupported(data) || voiceSupported(data) || sleepSupported(data);
+
   return (
     <>
       <div className="row between">
@@ -130,17 +152,38 @@ function DeviceBody() {
       </div>
       {error && <ErrorBox error={error} onRetry={refresh} />}
       <AlarmsCard data={data} refresh={refresh} />
+      {v030 && (
+        <Grid cols={2}>
+          <WakeCard data={data} busy={busy} setLive={setLive} />
+          <NightCard data={data} busy={busy} setLive={setLive} />
+        </Grid>
+      )}
       <Grid cols={2}>
-        <ScreenCard data={data} refresh={refresh} busy={busy} act={act} confirm={confirm} toast={toast}
+        <ScreenCard data={data} refresh={refresh} busy={busy} act={act} confirm={confirm} toast={toast} setLive={setLive}
           onReboot={() => rebootEcho('Para aplicar as configurações de tela que só valem no boot.')}
           onGoMaint={() => navigate('settings', { tab: 'maint' })} />
         <SoundCard data={data} refresh={refresh} busy={busy} act={act} />
       </Grid>
+      {v030 ? (
+        <>
+          <Grid cols={2}>
+            <WeatherCard data={data} refresh={refresh} />
+            <VoiceCard data={data} busy={busy} setLive={setLive} />
+          </Grid>
+          <SleepCard data={data} busy={busy} setLive={setLive} />
+        </>
+      ) : (
+        <div className="dv-note">
+          <Info size={15} />
+          <div>
+            Nascer do sol, volume gradual, relógio noturno, clima, voz e diário de sono: {NEEDS_V030}
+            {data.version ? <> (este Echo roda {data.version})</> : null}. Atualize o sistema do Echo para tê-los aqui e na tela.
+          </div>
+        </div>
+      )}
     </>
   );
 }
-
-type ActFn = (key: string, fn: () => Promise<unknown>, okMsg?: string) => Promise<boolean>;
 
 // ------------------------------------------------------------------------------------------------
 // Alarms
@@ -323,7 +366,7 @@ function AlarmsCard({ data, refresh }: { data: DevState; refresh: () => void }) 
         <div className="muted small">
           {legacy
             ? <>No Echo: <code className="mono">{dev.raw ?? '(sem arquivo)'}</code>.</>
-            : <>Gravados em <code className="mono">{ALARMS_FILE}</code>; a tela os recarrega sozinha. Músicas: arquivos .mp3/.wav em <code className="mono">{MUSIC_DIR}</code>.</>}
+            : <>Gravados em <code className="mono">{ALARMS_FILE}</code>; a tela os recarrega sozinha. Músicas: arquivos .mp3 (ou .wav em 48 kHz, 16 bits, estéreo; outros WAV viram bipe) em <code className="mono">{MUSIC_DIR}</code>.</>}
           {' '}Cada alarme toca por até 10 min; os botões de volume ou um toque na tela param o alarme.
         </div>
       </div>
@@ -404,10 +447,10 @@ function TimeUnit({ label, value, max, onChange, bigStep, compact }: { label: st
 // ------------------------------------------------------------------------------------------------
 // Screen
 
-function ScreenCard({ data, refresh, busy, act, confirm, toast, onReboot, onGoMaint }: {
+function ScreenCard({ data, refresh, busy, act, confirm, toast, setLive, onReboot, onGoMaint }: {
   data: DevState; refresh: () => void; busy: string | null; act: ActFn;
   confirm: ReturnType<typeof useApp>['confirm']; toast: ReturnType<typeof useApp>['toast'];
-  onReboot: () => void; onGoMaint: () => void;
+  setLive: SetLive; onReboot: () => void; onGoMaint: () => void;
 }) {
   const [bl, setBl] = useState<number | null>(null);
   const [prevBl, setPrevBl] = useState<number | null>(null);
@@ -453,15 +496,6 @@ function ScreenCard({ data, refresh, busy, act, confirm, toast, onReboot, onGoMa
   const screenOn = async () => {
     const target = prevBl && prevBl > 0 ? prevBl : saved > 0 ? saved : 90;
     await writeBl(target);
-  };
-
-  /** A brightness setting the screen picks up by itself within seconds (penguin-ui re-reads them). */
-  const setLive = async (key: string, value: number, okMsg: string, also: Record<string, string> = {}) => {
-    const bad = validateSetting(META_BY_KEY[key], String(value), { ...eff, ...also, [key]: String(value) });
-    if (bad) { toast(`${key}: ${bad}`, 'error'); return false; }
-    const ok = await act(key, () => run(setCommand(key, String(value), data.defaults[key])), okMsg);
-    refresh();
-    return ok;
   };
 
   const setScreen = async (key: 'SCREEN_UI' | 'SCREEN_MIRROR' | 'SCREEN_LOGLEVEL', value: string) => {
@@ -571,10 +605,7 @@ function ScreenCard({ data, refresh, busy, act, confirm, toast, onReboot, onGoMa
 }
 
 /** The two levels automatic brightness moves between, and the sensor's thresholds, set from here. */
-function AutoBrightness({ data, busy, setLive }: {
-  data: DevState; busy: string | null;
-  setLive: (key: string, value: number, okMsg: string, also?: Record<string, string>) => Promise<boolean>;
-}) {
+function AutoBrightness({ data, busy, setLive }: { data: DevState; busy: string | null; setLive: SetLive }) {
   const eff = data.effective;
   const num = (k: string, d: number) => (/^\d+$/.test(eff[k] ?? '') ? Number(eff[k]) : d);
   const hi = num('BACKLIGHT', 90);
@@ -595,18 +626,8 @@ function AutoBrightness({ data, busy, setLive }: {
     setLive('BACKLIGHT_DARK', loDraft, `Brilho no ambiente escuro: ${loDraft}`).then(() => setLo(null));
   };
 
-  // Calibration from the reading now: "this is dark" / "this is a lit room".
-  const thisIsDark = async () => {
-    if (light == null) return;
-    // A margin above the reading, so the sensor's small swings in the dark still count as dark.
-    const v = Math.min(4000, light + Math.max(2, Math.round(light * 0.2)));
-    let b = bright;
-    if (v >= bright) {
-      b = Math.min(4095, Math.max(v + 1, v * 4));
-      if (!(await setLive('LIGHT_BRIGHT', b, `Claro: leituras a partir de ${b}`, { LIGHT_DARK: String(dark) }))) return;
-    }
-    await setLive('LIGHT_DARK', v, `Escuro: leituras até ${v}`, { LIGHT_BRIGHT: String(b) });
-  };
+  // Calibration from the reading now: "this is dark" (shared with the night clock and the sleep diary) / "this is a lit room".
+  const thisIsDark = () => calibrateDark(data, setLive);
   const thisIsLit = () => {
     if (light == null) return;
     const v = Math.max(dark + 1, light);

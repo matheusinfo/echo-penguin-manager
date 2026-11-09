@@ -43,3 +43,27 @@
 .dv-note svg { flex: none; margin-top: 1px; }
 .dv-beep { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
 .dv-beep .input { width: 100px; }
+
+/* echo-penguin v0.3.0: night clock, weather, voice, sleep diary (src/pages/device/). */
+.dv-seg button:disabled { opacity: .6; cursor: default; }
+.dv-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+.dv-weather { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-2); }
+.dv-weather-temp { font: 600 34px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.dv-weather .badge { margin-left: 8px; }
+.dv-places { display: flex; flex-direction: column; gap: 6px; }
+.dv-place { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: var(--radius-s); border: 1px solid var(--border); background: var(--bg-2); }
+.dv-spoken { font-size: 13px; color: var(--text-2); font-style: italic; padding: 6px 10px; border-left: 2px solid var(--border); }
+
+.dv-sleep-sum { display: flex; gap: 32px; flex-wrap: wrap; }
+.dv-sleep-big { font: 600 22px/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+.dv-sleep { display: flex; flex-direction: column; font-size: 12.5px; }
+.dv-sleep-row { display: grid; grid-template-columns: 78px minmax(160px, 1fr) 56px 70px 62px; gap: 10px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(42, 48, 64, .6); }
+.dv-sleep-row:last-child { border-bottom: 0; }
+.dv-sleep-row:not(.head):hover { background: rgba(255, 255, 255, .02); }
+.dv-sleep-row.head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; padding-bottom: 6px; }
+.dv-sleep-track { position: relative; height: 16px; }
+.dv-sleep-track.axis { height: 14px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.dv-sleep-tick { position: absolute; top: 0; transform: translateX(-50%); font: 500 10.5px var(--mono); color: var(--muted); white-space: nowrap; }
+.dv-sleep-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(42, 48, 64, .9); }
+.dv-sleep-bar { position: absolute; top: 3px; height: 10px; min-width: 4px; border-radius: 4px; background: var(--accent); }
+.dv-sleep-row:not(.head):hover .dv-sleep-bar { background: #7cb1ff; }

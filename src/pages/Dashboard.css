@@ -68,3 +68,8 @@
   .dash-banner { flex-wrap: wrap; }
   .dash-banner-meta { align-items: flex-start; text-align: left; }
 }
+
+/* Alarm card: weather and last night (echo-penguin v0.3.0+). */
+.dash-morning { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(42, 48, 64, .9); font-size: 12.5px; }
+.dash-morning .row { min-width: 0; }
+.dash-morning svg { flex: none; }
