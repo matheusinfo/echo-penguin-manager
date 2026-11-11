@@ -2,12 +2,14 @@
 // a test that says what the Echo says after an alarm. echo-penguin v0.3.0+. With v0.3.1+, the
 // alarm's greeting can use Piper, a natural offline voice (SPEAK_ENGINE, PIPER_VOICE): it takes about
 // 40 s to render on the Echo, so penguin-ui prepares it ahead; the tap on the clock stays espeak.
+// After v0.3.1 Piper is the only voice (PiperVoiceCard): the tap on the clock is said from clips the
+// Echo renders ahead, in the same voice; SPEAK_ENGINE and SPEAK_VOICE are gone.
 import { useEffect, useState } from 'react';
 import { Info, MessageSquare, Play, Sparkles, Speech, TriangleAlert } from 'lucide-react';
 import { errMsg, run } from '../../api';
 import { useApp } from '../../hooks';
 import { Button, Card, Switch } from '../../components/ui';
-import { COMMON_VOICES, sayCmd, sayGreetingCmd, sayTextError, speaksPortuguese, validVoice, voiceLabel } from '../weather';
+import { COMMON_VOICES, sayClockCmd, sayCmd, sayGreetingCmd, sayTextError, speaksPortuguese, validVoice, voiceLabel } from '../weather';
 import { NEEDS_V031, validPiperVoice } from '../features';
 import { Custom, DevState, NeedsVersion, SetLive, SettingSeg } from './common';
 
@@ -17,7 +19,7 @@ const DEFAULT_PIPER_VOICE = 'pt_BR-faber-medium';
 const PIPER_TIMEOUT_MS = 150000;
 
 export function voiceSupported(data: DevState): boolean {
-  return data.features.say && 'SPEAK_VOICE' in data.defaults;
+  return data.features.say && ('SPEAK_VOICE' in data.defaults || data.features.clips);
 }
 
 /** The unit has Piper and knows its settings (echo-penguin v0.3.1+). */
@@ -38,7 +40,111 @@ function useElapsed(on: boolean): number {
   return s;
 }
 
-export function VoiceCard({ data, busy, setLive }: { data: DevState; busy: string | null; setLive: SetLive }) {
+interface VoiceProps { data: DevState; busy: string | null; setLive: SetLive }
+
+export function VoiceCard(props: VoiceProps) {
+  return props.data.features.clips ? <PiperVoiceCard {...props} /> : <EngineVoiceCard {...props} />;
+}
+
+/** After v0.3.1: one voice, Piper's, for the alarm's greeting and the tap on the clock. */
+function PiperVoiceCard({ data, busy, setLive }: VoiceProps) {
+  const { toast } = useApp();
+  const [spoken, setSpoken] = useState<string | null>(null);
+  const [text, setText] = useState('');
+  const [speaking, setSpeaking] = useState<string | null>(null);
+  const elapsed = useElapsed(speaking === 'alarm' || speaking === 'text');
+
+  const speakAlarm = (data.effective.SPEAK_ALARM ?? data.defaults.SPEAK_ALARM ?? '1') === '1';
+  const voice = data.effective.PIPER_VOICE || data.defaults.PIPER_VOICE || DEFAULT_PIPER_VOICE;
+  const list = data.piperVoices;
+  const missing = !data.features.piper || !list.includes(voice);
+  const textErr = text ? sayTextError(text) : null;
+
+  const say = async (key: string, cmd: string, show: boolean, timeout = 90000) => {
+    setSpeaking(key);
+    if (show) setSpoken(null);
+    try {
+      const out = (await run(cmd, { timeout })).trim();
+      if (show) setSpoken(out.split('\n')[0] || null);
+    } catch (e) {
+      toast(errMsg(e), 'error');
+    } finally {
+      setSpeaking(null);
+    }
+  };
+
+  return (
+    <Card title="Voz" icon={<Speech size={16} />}>
+      <div className="col gap-m">
+        {!data.features.piper && (
+          <div className="dv-note warn"><TriangleAlert size={15} /><div>O Piper não está instalado neste Echo: ele não consegue falar.</div></div>
+        )}
+        <div className="dv-opt">
+          <div>
+            <div className="dv-opt-title">Voz <span className="mono muted small">PIPER_VOICE</span><Custom data={data} k="PIPER_VOICE" /></div>
+            <div className="dv-opt-desc">
+              A voz natural (Piper) do despertador e do toque no relógio. Fala em {speaksPortuguese(voice.toLowerCase()) ? 'português' : 'inglês'}: as
+              vozes pt* falam português, as outras inglês. As vozes ficam em /usr/share/piper/voices e as suas em /data/penguin/voices
+              (arquivos .onnx e .onnx.json). Ao trocar de voz, o Echo leva uns 10 min para preparar as frases do relógio.
+            </div>
+          </div>
+          <select className="input" value={voice} disabled={busy === 'PIPER_VOICE'} aria-label="voz"
+            onChange={(e) => validPiperVoice(e.target.value) && setLive('PIPER_VOICE', e.target.value, `Voz: ${e.target.value}`)}>
+            {!list.includes(voice) && <option value={voice}>{voice} (não encontrada)</option>}
+            {list.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+        </div>
+        {data.features.piper && missing && (
+          <div className="dv-note warn">
+            <TriangleAlert size={15} />
+            <div>{list.length ? <>A voz <span className="mono">{voice}</span> não está no Echo.</> : 'Nenhuma voz do Piper encontrada no Echo.'} Sem ela, o Echo não fala.</div>
+          </div>
+        )}
+        <div className="dv-opt">
+          <div>
+            <div className="dv-opt-title">Falar depois do alarme <span className="mono muted small">SPEAK_ALARM</span><Custom data={data} k="SPEAK_ALARM" /></div>
+            <div className="dv-opt-desc">Ao parar um alarme, o Echo diz bom dia, a hora em que o alarme tocou e o clima (fala preparada uns 10 min antes). Tocar no relógio grande da tela inicial também fala, na hora, com a mesma voz.</div>
+          </div>
+          <Switch checked={speakAlarm} disabled={busy === 'SPEAK_ALARM'}
+            onChange={(v) => setLive('SPEAK_ALARM', v ? '1' : '0', v ? 'O Echo fala depois do alarme' : 'O Echo não fala depois do alarme')} />
+        </div>
+        <div className="col gap-s">
+          <div className="row gap-s wrap">
+            <Button variant="primary" icon={<Play size={14} />} busy={speaking === 'clock'} disabled={speaking != null || missing}
+              onClick={() => say('clock', sayClockCmd(), true)}
+              title={'penguin-sound say --ready "$(penguin-weather speech --clips)"'}>Testar voz</Button>
+            <span className="muted small">o que o Echo diz ao tocar no relógio, na hora</span>
+          </div>
+          <div className="row gap-s wrap">
+            <Button icon={<Sparkles size={14} />} busy={speaking === 'alarm'} disabled={speaking != null || missing}
+              onClick={() => say('alarm', sayGreetingCmd('piper', voice), true, PIPER_TIMEOUT_MS)}
+              title={`penguin-sound say -v ${voice} "$(penguin-weather speech)"`}>Testar fala completa</Button>
+            <span className="muted small">
+              {speaking === 'alarm' ? `Gerando a fala com o Piper (cerca de 40 s)… ${elapsed} s` : 'a frase inteira, gerada agora (cerca de 40 s)'}
+            </span>
+          </div>
+          {spoken && speaking == null && <div className="dv-spoken">“{spoken}”</div>}
+        </div>
+        <div className="col gap-s">
+          <span className="field-label">Falar um texto</span>
+          <form className="row gap-s" onSubmit={(e) => { e.preventDefault(); if (!sayTextError(text)) say('text', sayCmd(text), false, PIPER_TIMEOUT_MS); }}>
+            <input className="input grow" value={text} maxLength={300} placeholder={speaksPortuguese(voice.toLowerCase()) ? 'ex.: O café está pronto' : 'ex.: Coffee is ready'}
+              onChange={(e) => setText(e.target.value)} />
+            <Button type="submit" icon={<MessageSquare size={14} />} busy={speaking === 'text'} disabled={speaking != null || missing || !text.trim() || !!textErr}>Falar</Button>
+          </form>
+          {textErr && <span className="st-err" style={{ color: 'var(--bad)', fontSize: 12 }}>{textErr}</span>}
+          <span className="field-hint">
+            {speaking === 'text' ? `Gerando a fala com o Piper… ${elapsed} s` : 'Com a voz do Piper, no volume atual: uns 20 a 40 s até falar (um texto repetido sai na hora).'}{' '}
+            Se algo já estiver tocando, a fala é ignorada (penguin-sound toca um som por vez).
+          </span>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** Up to v0.3.1: espeak-ng's voice, and with v0.3.1 Piper for the alarm's greeting (SPEAK_ENGINE). */
+function EngineVoiceCard({ data, busy, setLive }: VoiceProps) {
   const { toast } = useApp();
   const [spoken, setSpoken] = useState<string | null>(null);
   const [text, setText] = useState('');

@@ -175,8 +175,11 @@ You can change any of this later with the ✏️ pencil next to the connection s
   **Piper (natural)**, pick the **Voz natural** (the image has `pt_BR-faber-medium`; extra Piper voices go
   in `/data/penguin/voices` as `.onnx` + `.onnx.json`) and **Testar voz natural** (it takes about 40 s
   before it speaks). Piper is offline but slow on the Echo, so the greeting is prepared about 10 minutes
-  before the alarm; tapping the clock still uses the instant espeak voice. Needs echo-penguin v0.3.1 or
-  newer.
+  before the alarm; tapping the clock still uses the instant espeak voice. That is echo-penguin v0.3.1.
+  After v0.3.1 Piper is the only voice: *Voz* shows just the **Voz** (Piper's), the tap on the clock
+  speaks at once in that same voice (the Echo prepares its phrases in the background, about 10 minutes
+  after the first start or a change of voice), **Testar voz** plays what the tap says and **Testar fala
+  completa** renders the whole greeting now.
 - **…see how I slept?** *Alarme & Tela* → *Sono*: each night as a bar from lights off to waking up,
   with the times, the duration and the 7-night average. The diary works from the room's
   light: if nights don't show up, click **Está escuro agora** with the light off.

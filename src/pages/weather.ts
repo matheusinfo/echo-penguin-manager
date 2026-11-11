@@ -257,4 +257,12 @@ export function sayGreetingCmd(engine?: SpeakEngine, piperVoice?: string): strin
     `penguin-sound say ${engineOpt(engine, piperVoice)}"$t" >/dev/null`;
 }
 
+/** After v0.3.1: says what a tap on the home clock says (Piper clips rendered ahead, instant), printing
+ *  its text first. Exit 4 from `say --ready`: the clips are not rendered yet. */
+export function sayClockCmd(): string {
+  return 't=$(penguin-weather speech --clips) || exit 1; [ -n "$t" ] || exit 1; printf "%s\\n" "$t" | tr "\\n" " "; echo; ' +
+    'penguin-sound say --ready "$t" >/dev/null; rc=$?; ' +
+    '[ $rc = 4 ] && { echo "a voz ainda está sendo preparada no Echo: tente de novo em alguns minutos" >&2; exit 4; }; exit $rc';
+}
+
 export const sayCmd = (text: string, engine?: SpeakEngine) => `penguin-sound say ${engineOpt(engine)}${shq(text.trim())}`;

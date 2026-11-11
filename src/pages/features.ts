@@ -2,7 +2,8 @@
 // weather, speech, sleep diary), detected from the files on the unit like alarms.ts detects the alarm
 // format, so the pages keep working with older images. This covers the programs those features need;
 // settings-only ones (gradual wake, night clock) are detected from their keys in defaults.conf.
-// v0.3.1 adds Piper, a natural (neural, offline) voice for the alarm's greeting.
+// v0.3.1 adds Piper, a natural (neural, offline) voice for the alarm's greeting. After v0.3.1 Piper is
+// the only voice (espeak-ng's is gone): the clock's tap is said from clips rendered ahead.
 
 export const NEEDS_V030 = 'requer echo-penguin v0.3.0';
 export const NEEDS_V031 = 'requer echo-penguin v0.3.1';
@@ -18,13 +19,16 @@ export interface Features {
   espeak: boolean;
   /** Piper, the offline neural voice (/usr/local/bin/piper), v0.3.1+. Its settings need SPEAK_ENGINE in defaults.conf too. */
   piper: boolean;
+  /** penguin-sound speaks from Piper clips (`say --ready`, `prepare`): Piper is the only voice, after v0.3.1. */
+  clips: boolean;
 }
 
 /** One shell section: prints one word per feature present. Cheap (one grep), so it runs every poll. */
 export const FEATURES_CMD =
   'for f in penguin-weather penguin-sleep; do [ -x /usr/local/sbin/$f ] && echo $f; done; ' +
   'grep -q espeak /usr/local/sbin/penguin-sound 2>/dev/null && echo say; ' +
-  'command -v espeak-ng >/dev/null 2>&1 && echo espeak; [ -x /usr/local/bin/piper ] && echo piper; true';
+  'command -v espeak-ng >/dev/null 2>&1 && echo espeak; [ -x /usr/local/bin/piper ] && echo piper; ' +
+  'grep -q -e --ready /usr/local/sbin/penguin-sound 2>/dev/null && echo clips; true';
 
 export function parseFeatures(section: string | undefined): Features {
   const s = new Set((section ?? '').split('\n').map((x) => x.trim()));
@@ -34,6 +38,7 @@ export function parseFeatures(section: string | undefined): Features {
     say: s.has('say'),
     espeak: s.has('espeak'),
     piper: s.has('piper'),
+    clips: s.has('clips'),
   };
 }
 

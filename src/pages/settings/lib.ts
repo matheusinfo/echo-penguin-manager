@@ -193,16 +193,16 @@ export const SETTINGS_META: SettingMeta[] = [
   },
   {
     key: 'SPEAK_VOICE', label: 'Voz', group: 'Voz', kind: 'text', apply: 'screen',
-    desc: 'Voz do espeak-ng (en, pt-br, es, …; letras minúsculas, números, + e -). Vozes pt* falam português; as outras, inglês.',
+    desc: 'Só até o echo-penguin v0.3.1: voz do espeak-ng (en, pt-br, es, …; letras minúsculas, números, + e -). Vozes pt* falam português; as outras, inglês. Depois da v0.3.1 a voz é sempre a do Piper (PIPER_VOICE).',
   },
   {
     key: 'SPEAK_ENGINE', label: 'Motor de voz', group: 'Voz', kind: 'select', apply: 'screen',
     options: [{ value: 'espeak', label: 'espeak (robótica, instantânea)' }, { value: 'piper', label: 'Piper (natural)' }],
-    desc: 'espeak: a voz do espeak-ng (SPEAK_VOICE), na hora. piper: a fala do despertador vem do Piper, uma voz neural offline (PIPER_VOICE); como ela leva uns 40 s para ser gerada, o Echo a prepara uns 10 min antes do alarme. Tocar no relógio da tela inicial continua usando o espeak (instantâneo).',
+    desc: 'Só no echo-penguin v0.3.1 (depois dele a voz é sempre a do Piper). espeak: a voz do espeak-ng (SPEAK_VOICE), na hora. piper: a fala do despertador vem do Piper, uma voz neural offline (PIPER_VOICE); como ela leva uns 40 s para ser gerada, o Echo a prepara uns 10 min antes do alarme. Tocar no relógio da tela inicial continua usando o espeak (instantâneo).',
   },
   {
     key: 'PIPER_VOICE', label: 'Voz natural (Piper)', group: 'Voz', kind: 'text', apply: 'screen',
-    desc: 'Nome de uma voz do Piper, sem .onnx (ex.: pt_BR-faber-medium): os arquivos <nome>.onnx em /usr/share/piper/voices e /data/penguin/voices. Letras, números, _, . e -.',
+    desc: 'Nome de uma voz do Piper, sem .onnx (ex.: pt_BR-faber-medium): os arquivos <nome>.onnx em /usr/share/piper/voices e /data/penguin/voices. Letras, números, _, . e -. Depois da v0.3.1 é a voz de tudo o que o Echo fala; ao trocá-la, o Echo leva uns 10 min para preparar as frases do relógio.',
   },
   {
     key: 'SPEAK_ALARM', label: 'Falar depois do alarme', group: 'Voz', kind: 'bool', apply: 'screen',
